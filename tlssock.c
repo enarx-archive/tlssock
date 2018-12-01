@@ -46,97 +46,50 @@
 #define _str(s) __str(s)
 #define NEXT(name) ((typeof(name) *) dlsym(RTLD_NEXT, _str(name)))
 
-#define options_auto_t options_t __attribute__((cleanup(options_cleanup)))
 #define ctx_auto_t ctx_t __attribute__((cleanup(release)))
-#define fd_auto_t fd_t __attribute__((cleanup(fdclose)))
 
-typedef int fd_t;
-
-typedef struct {
-  size_t size;
-  uint8_t data[];
-} buffer_t;
-
-typedef struct {
-  buffer_t *root;
-  buffer_t *cert;
-  buffer_t *key;
-  char *name;
-} options_t;
-
-typedef struct {
-  options_t *opt;
-  SSL_CTX *ctx;
-  SSL *ssl;
+typedef enum {
+  UNDEFINED = 0,
+  CREATED,
+  ACCEPTED,
+  CONNECTED,
+  ESTABLISHED,
 } state_t;
 
 typedef struct {
+  const SSL_METHOD *method;
+} created_t;
+
+typedef struct {
+  SSL_CTX *ctx;
+} accepted_t;
+
+typedef struct {
+  SSL_CTX *ctx;
+  char *name;
+} connected_t;
+
+typedef struct {
+  SSL *ssl;
+} established_t;
+
+typedef struct {
   pthread_mutex_t mutex;
-  state_t state;
+  struct {
+    state_t state;
+    union {
+      created_t created;
+      accepted_t accepted;
+      connected_t connected;
+      established_t established;
+    };
+  } data;
 } ctx_t;
 
 static struct {
   size_t size;
   ctx_t *ctx;
 } global;
-
-static buffer_t *
-buffer_dup(const void *data, size_t size)
-{
-  buffer_t *buf = NULL;
-  
-  buf = calloc(1, sizeof(buffer_t) + size);
-  if (!buf)
-    return NULL;
-  
-  memcpy(buf->data, data, size);
-  buf->size = size;
-
-  return buf;
-}
-
-static void
-buffer_free(buffer_t *buf)
-{
-  if (!buf)
-    return;
-
-  OPENSSL_cleanse(buf, sizeof(*buf) + buf->size);
-  free(buf);
-}
-
-static void
-options_free(options_t *opt)
-{
-  if (!opt)
-    return;
-
-  buffer_free(opt->root);
-  buffer_free(opt->cert);
-  buffer_free(opt->key);
-  free(opt->name);
-  free(opt);
-}
-
-static void
-options_cleanup(options_t **opt)
-{
-  if (opt)
-    options_free(*opt);
-}
-
-static void
-state_clear(state_t *state)
-{
-  if (!state)
-    return;
-  
-  options_free(state->opt);
-  SSL_free(state->ssl);
-  SSL_CTX_free(state->ctx);
-
-  memset(state, 0, sizeof(*state));
-}
 
 static inline int
 err(int errnum)
@@ -148,10 +101,8 @@ err(int errnum)
 static inline ctx_t *
 acquire(int fd)
 {
-  if (fd < 0 || (size_t) fd >= global.size) {
-    errno = EBADFD;
+  if (fd < 0 || (size_t) fd >= global.size)
     return NULL;
-  }
   
   pthread_mutex_lock(&global.ctx[fd].mutex);
   return &global.ctx[fd];
@@ -162,25 +113,36 @@ release(ctx_t **ctx)
 {
   if (!ctx || !*ctx)
     return;
-  
+
   pthread_mutex_unlock(&(*ctx)->mutex);
+  *ctx = NULL;
 }
 
 static inline void
-fdclose(fd_t *fd)
+ctx_reset(ctx_t *ctx)
 {
-  if (!fd || *fd < 0)
+  if (!ctx)
     return;
-  
-  close(*fd);
-}
 
-static inline int
-fdsteal(fd_t *fd)
-{
-  int ret = *fd;
-  *fd = -1;
-  return ret;
+  switch (ctx->data.state) {
+  case ACCEPTED:
+    SSL_CTX_free(ctx->data.accepted.ctx);
+    break;
+
+  case CONNECTED:
+    SSL_CTX_free(ctx->data.connected.ctx);
+    free(ctx->data.connected.name);
+    break;
+
+  case ESTABLISHED:
+    SSL_free(ctx->data.established.ssl);
+    break;
+
+  default:
+    break;
+  }
+
+  memset(&ctx->data, 0, sizeof(ctx->data));
 }
 
 int
@@ -192,17 +154,60 @@ accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 int
 accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 {
-  return NEXT(accept4)(sockfd, addr, addrlen, flags);
+  ctx_auto_t *ctx = NULL;
+  ctx_auto_t *con = NULL;
+  SSL_CTX *ssl = NULL;
+  int fd;
+
+  ctx = acquire(sockfd);
+  if (!ctx)
+    return err(EBADFD); // FIXME
+
+  switch (ctx->data.state) {
+  case UNDEFINED:
+    break;
+
+  case CREATED:
+    ssl = SSL_CTX_new(ctx->data.created.method);
+    if (!ssl)
+      return err(ENOMEM);
+    break;
+
+  default:
+    return err(EBADFD); // FIXME
+  }
+
+  fd = NEXT(accept4)(sockfd, addr, addrlen, flags);
+  if (fd < 0) {
+    SSL_CTX_free(ssl);
+    return fd;
+  }
+
+  con = acquire(fd);
+  if (!con) {
+    SSL_CTX_free(ssl);
+    close(fd);
+    return err(EBADFD); // FIXME
+  }
+
+  ctx_reset(con);
+
+  if (ctx->data.state == CREATED) {
+    con->data.state = ACCEPTED;
+    con->data.accepted.ctx = ssl;
+  }
+
+  return fd;
 }
 
 int
 close(int fd)
 {
   ctx_auto_t *ctx = NULL;
-  
+
   ctx = acquire(fd);
   if (ctx)
-    state_clear(&ctx->state);
+    ctx_reset(ctx);
 
   return NEXT(close)(fd);
 }
@@ -210,60 +215,79 @@ close(int fd)
 int
 connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
-  options_auto_t *opt = NULL;
   ctx_auto_t *ctx = NULL;
+  SSL_CTX *ssl = NULL;
   int ret;
 
-  ret = NEXT(connect)(sockfd, addr, addrlen);
-  if (ret < 0)
-    return ret;
-  
   ctx = acquire(sockfd);
-  if (!ctx || !ctx->state.ctx)
-    return -1;
-  
-  opt = ctx->state.opt;
-  ctx->state.opt = NULL;
-  if (!opt || !opt->name)
-    return err(EBADFD);
+  if (!ctx)
+    return err(EBADFD); // FIXME
 
-  ctx->state.ssl = SSL_new(ctx->state.ctx);
-  if (!ctx->state.ssl)
-    return err(ENOMEM); // FIXME
+  switch (ctx->data.state) {
+  case UNDEFINED:
+    break;
 
-  if (!SSL_set_tlsext_host_name(ctx->state.ssl, opt->name))
-    return err(ENOMEM); // FIXME
-  
-  // TODO: Client Certificate
-  // TODO: Root CAs
-  
-  if (!SSL_set_fd(ctx->state.ssl, sockfd))
-    return err(ENOMEM); // FIXME
-  
-  if (!SSL_connect(ctx->state.ssl))
-    return err(EIO); // FIXME
-  
-  if (!SSL_do_handshake(ctx->state.ssl))
-    return err(EIO); // FIXME
-  
-  return 0;
+  case CREATED:
+    ssl = SSL_CTX_new(ctx->data.created.method);
+    if (!ssl)
+      return err(ENOMEM);
+
+    SSL_CTX_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+    break;
+
+  default:
+    return err(EBADFD); // FIXME
+  }
+
+  ret = NEXT(connect)(sockfd, addr, addrlen);
+  if (ret < 0) {
+    SSL_CTX_free(ssl);
+    return ret;
+  }
+
+  if (ctx->data.state == CREATED) {
+    ctx->data.state = CONNECTED;
+    ctx->data.connected.ctx = ssl;
+  }
+
+  return ret;
 }
 
 int
 dup(int oldfd)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(oldfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(dup)(oldfd);
 }
 
 int
 dup2(int oldfd, int newfd)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(oldfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(dup2)(oldfd, newfd);
 }
 
 FILE *
 fdopen(int fd, const char *mode)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(fd);
+  if (ctx && ctx->data.state != UNDEFINED) {
+    errno = ENOTSUP;
+    return NULL;
+  }
+
   return NEXT(fdopen)(fd, mode);
 }
 
@@ -289,12 +313,24 @@ ssize_t
 recvfrom(int sockfd, void *buf, size_t len, int flags,
          struct sockaddr *src_addr, socklen_t *addrlen)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(sockfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(recvfrom)(sockfd, buf, len, flags, src_addr, addrlen);
 }
 
 ssize_t
 recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(sockfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(recvmsg)(sockfd, msg, flags);
 }
 
@@ -308,12 +344,24 @@ ssize_t
 sendto(int sockfd, const void *buf, size_t len, int flags,
        const struct sockaddr *dest_addr, socklen_t addrlen)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(sockfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(sendto)(sockfd, buf, len, flags, dest_addr, addrlen);
 }
 
 ssize_t
 sendmsg(int sockfd, const struct msghdr *msg, int flags)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(sockfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(sendmsg)(sockfd, msg, flags);
 }
 
@@ -321,6 +369,7 @@ int
 setsockopt(int sockfd, int level, int optname,
            const void *optval, socklen_t optlen)
 {
+  tls_opt_t opt = optname;
   ctx_auto_t *ctx = NULL;
 
   if (level != PROT_TLS)
@@ -328,32 +377,109 @@ setsockopt(int sockfd, int level, int optname,
 
   ctx = acquire(sockfd);
   if (!ctx)
-    return -1;
-  
-  if (!ctx->state.opt)
-    return err(EBADFD); // FIXME (correct error?)
-  
-  switch (optname) {
-  case TLS_SELF_NAME:
-    ctx->state.opt->name = strndup(optval, optlen);
-    return ctx->state.opt->name ? 0 : -1;
+    return err(EBADFD); // FIXME
 
-  case TLS_SELF_CERT:
-    ctx->state.opt->cert = buffer_dup(optval, optlen);
-    return ctx->state.opt->cert ? 0 : -1;
+  switch (ctx->data.state) {
+  case ACCEPTED:
+    switch (opt) {
+    case TLS_OPT_HANDSHAKE:
+      return err(ENOSYS); // TODO
 
-  case TLS_SELF_KEY:
-    ctx->state.opt->key = buffer_dup(optval, optlen);
-    return ctx->state.opt->key ? 0 : -1;
+    case TLS_OPT_SELF_KEY:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_SELF_CERT:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_ROOT_CERT:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_SELF_NAME:
+    case TLS_OPT_PEER_NAME:
+    case TLS_OPT_PEER_CERT:
+      return err(ENOTSUP); // FIXME
+
+    default:
+      return err(EINVAL); // FIXME
+    }
+
+  case CONNECTED:
+    switch (opt) {
+    case TLS_OPT_HANDSHAKE: {
+      SSL *ssl = NULL;
+      int ret = -1;
+
+      if (optval != NULL)
+        return err(EINVAL);
+
+      ssl = SSL_new(ctx->data.connected.ctx);
+      if (!ssl)
+        return err(ENOMEM);
+
+      if (SSL_set_tlsext_host_name(ssl, ctx->data.connected.name) != 0) {
+        SSL_free(ssl);
+        return err(EINVAL); // FIXME
+      }
+
+      SSL_CTX_free(ctx->data.accepted.ctx);
+      ctx->data.state = ESTABLISHED;
+      ctx->data.established.ssl = ssl;
+
+      ret = SSL_connect(ssl);
+      if (ret != 1) {
+        switch (SSL_get_error(ssl, ret)) {
+        case SSL_ERROR_WANT_READ:
+        case SSL_ERROR_WANT_WRITE:
+          return err(EINPROGRESS); // FIXME
+
+        default:
+          return err(ENOKEY); // FIXME
+        }
+      }
+
+      if (SSL_do_handshake(ssl) != 0)
+        return err(EINVAL); // FIXME
+
+      // TODO: certificate validation
+
+      return 0;
+    }
+
+    case TLS_OPT_SELF_KEY:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_SELF_CERT:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_ROOT_CERT:
+      return err(ENOSYS); // TODO
+
+    case TLS_OPT_PEER_NAME:
+      ctx->data.connected.name = strndup(optval, optlen);
+      return ctx->data.connected.name ? 0 : -1;
+
+    case TLS_OPT_SELF_NAME:
+    case TLS_OPT_PEER_CERT:
+      return err(ENOTSUP); // FIXME
+
+    default:
+      return err(EINVAL); // FIXME
+    }
 
   default:
-    return err(ENOPROTOOPT); // FIXME (correct error?)
+    return err(EBADFD); // FIXME
   }
 }
 
 int
 shutdown(int sockfd, int how)
 {
+  ctx_auto_t *ctx = NULL;
+
+  ctx = acquire(sockfd);
+  if (ctx && ctx->data.state != UNDEFINED)
+    return err(ENOTSUP);
+
   return NEXT(shutdown)(sockfd, how);
 }
 
@@ -362,7 +488,7 @@ socket(int domain, int type, int protocol)
 {
   const SSL_METHOD *method = NULL;
   ctx_auto_t *ctx = NULL;
-  fd_auto_t fd = -1;
+  int fd = -1;
 
   if (protocol == PROT_TLS) {
     switch (domain) {
@@ -377,30 +503,25 @@ socket(int domain, int type, int protocol)
     default: return err(EPROTONOSUPPORT);
     }
   }
-  
+
   fd = NEXT(socket)(domain, type, protocol == PROT_TLS ? 0 : protocol);
   if (fd < 0)
     return fd;
- 
+
   ctx = acquire(fd);
-  if (!ctx)
+  if (!ctx) {
+    close(fd);
     return err(EMFILE);
-
-  state_clear(&ctx->state);
-
-  if (protocol == PROT_TLS) {
-    ctx->state.opt = calloc(1, sizeof(options_t));
-    if (!ctx->state.opt)
-      return -1;
-    
-    ctx->state.ctx = SSL_CTX_new(method);
-    if (!ctx->state.ctx) {
-      state_clear(&ctx->state);
-      return err(ENOMEM);
-    }
   }
 
-  return fdsteal(&fd);
+  ctx_reset(ctx);
+
+  if (protocol == PROT_TLS) {
+    ctx->data.created.method = method;
+    ctx->data.state = CREATED;
+  }
+
+  return fd;
 }
 
 ssize_t
@@ -420,7 +541,7 @@ constructor(void)
   global.ctx = calloc(max, sizeof(ctx_t));
   if (global.ctx == NULL)
     abort();
-  
+
   for (size_t i = 0; i < global.size; i++) {
     if (pthread_mutex_init(&global.ctx[i].mutex, NULL) != 0)
       abort();
@@ -429,10 +550,10 @@ constructor(void)
 
 static void __attribute__((destructor))
 destructor(void)
-{ 
+{
   for (size_t i = 0; i < global.size; i++) {
     pthread_mutex_lock(&global.ctx[i].mutex);
-    state_clear(&global.ctx[i].state);
+    ctx_reset(&global.ctx[i]);
     pthread_mutex_unlock(&global.ctx[i].mutex);
     pthread_mutex_destroy(&global.ctx[i].mutex);
   }
