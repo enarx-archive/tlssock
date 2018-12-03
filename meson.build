@@ -29,6 +29,8 @@ add_project_arguments(
   language: 'c'
 )
 
+subdir('tests')
+
 cc = meson.get_compiler('c')
 
 threads = dependency('threads')
