@@ -1,0 +1,42 @@
+digraph Workflow {
+  "socket(PROT_TLS)" -> "bind()";
+  "bind()" -> "listen()";
+  "listen()" -> "accept() / accept4()";
+
+  "accept() / accept4()" -> "setsockopt(CERT) " [label="new fd"];
+  "accept() / accept4()" -> "setsockopt(ROOT) " [label="new fd"];
+  "setsockopt(ROOT) " -> "setsockopt(CERT) ";
+  "setsockopt(ROOT) " -> "setsockopt(ROOT) " [style=dotted];
+  "setsockopt(CERT) " -> "setsockopt(CERT) " [style=dotted, label=SNI];
+  "setsockopt(CERT) " -> "setsockopt(HANDSHAKE)";
+
+  "accept() / accept4()" -> "accept() / accept4()";
+  "socket(PROT_TLS)" -> "connect()";
+
+  "connect()" -> "setsockopt(CERT)";
+  "setsockopt(CERT)" -> "setsockopt(ROOT)";
+  "setsockopt(CERT)" -> "setsockopt(NAME)";
+
+  "connect()" -> "setsockopt(ROOT)";
+  "setsockopt(ROOT)" -> "setsockopt(CERT)";
+  "setsockopt(ROOT)" -> "setsockopt(NAME)";
+  "setsockopt(ROOT)" -> "setsockopt(ROOT)" [style=dotted];
+
+  "connect()" -> "setsockopt(NAME)";
+  "setsockopt(NAME)" -> "setsockopt(CERT)";
+  "setsockopt(NAME)" -> "setsockopt(ROOT)";
+  "setsockopt(NAME)" -> "setsockopt(HANDSHAKE)";
+
+  "setsockopt(HANDSHAKE)" -> "getsockopt(PEER)";
+  "getsockopt(PEER)" -> "write() / send() / read() / recv()";
+  "getsockopt(PEER)" -> "fdopen()";
+  "getsockopt(PEER)" -> "close()";
+
+  "setsockopt(HANDSHAKE)" -> "write() / send() / read() / recv()";
+  "write() / send() / read() / recv()" -> "write() / send() / read() / recv()";
+  "write() / send() / read() / recv()" -> "getsockopt(PEER)";
+  "write() / send() / read() / recv()" -> "fdopen()";
+  "write() / send() / read() / recv()" -> "close()";
+
+  "setsockopt(HANDSHAKE)" -> "close()";
+}
