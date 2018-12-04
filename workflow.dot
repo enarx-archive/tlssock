@@ -1,42 +1,79 @@
 digraph Workflow {
+  compound=true;
+  node [style=rounded, shape=box];
+
+  subgraph cluster_info {
+    label=Info;
+
+    "getsockopt(TLS_OPT_SELF_NAME)" [style="rounded,filled"];
+    "getsockopt(TLS_OPT_SELF_CERT)" [style="rounded,filled"];
+    "getsockopt(TLS_OPT_PEER_NAME)" [style="rounded,filled"];
+    "getsockopt(TLS_OPT_PEER_CERT)" [style="rounded,filled"];
+
+    "getsockopt(TLS_OPT_SELF_NAME)" -> "getsockopt(TLS_OPT_SELF_CERT)" [style=invis];
+    "getsockopt(TLS_OPT_PEER_NAME)" -> "getsockopt(TLS_OPT_PEER_CERT)" [style=invis];
+  }
+
+  subgraph cluster_io {
+    label=IO;
+    "write()";
+    "send()";
+    "recv()";
+    "read()";
+  }
+
+  subgraph cluster_srv {
+    label=Server;
+
+    srv_self_cert [label="setsockopt(TLS_OPT_SELF_CERT)"];
+    srv_peer_name [label="setsockopt(TLS_OPT_PEER_NAME)",style="rounded,filled"];
+    srv_peer_cert [label="setsockopt(TLS_OPT_PEER_CERT)",style="rounded,filled"];
+    srv_root_cert [label="setsockopt(TLS_OPT_ROOT_CERT)",style="rounded,filled"];
+
+    "bind()" -> "listen()";
+
+    "listen()" -> "accept()";
+    "accept()" -> "accept()" [label=" main loop "];
+    "accept()" -> srv_self_cert [label=" new connection "];
+
+    "listen()" -> "accept4()";
+    "accept4()" -> "accept4()" [label=" main loop "];
+    "accept4()" -> srv_self_cert [label=" new connection "];
+
+    srv_self_cert -> srv_self_cert [label=SNI, style=dashed];
+
+    srv_self_cert -> srv_root_cert;
+    srv_self_cert -> srv_peer_cert;
+    srv_root_cert -> srv_peer_name;
+  }
+
+  subgraph cluster_clt {
+    label=Client;
+
+    clt_peer_name [label="setsockopt(TLS_OPT_PEER_NAME)"];
+    clt_peer_cert [label="setsockopt(TLS_OPT_PEER_CERT)"];
+    clt_self_cert [label="setsockopt(TLS_OPT_SELF_CERT)",style="rounded,filled"];
+    clt_root_cert [label="setsockopt(TLS_OPT_ROOT_CERT)",style="rounded,filled"];
+
+    "connect()" -> clt_peer_cert;
+    clt_peer_cert -> clt_self_cert;
+
+    "connect()" -> clt_peer_name;
+    clt_peer_name -> clt_self_cert;
+
+    clt_self_cert -> clt_root_cert
+  }
+
   "socket(PROT_TLS)" -> "bind()";
-  "bind()" -> "listen()";
-  "listen()" -> "accept() / accept4()";
-
-  "accept() / accept4()" -> "setsockopt(CERT) " [label="new fd"];
-  "accept() / accept4()" -> "setsockopt(ROOT) " [label="new fd"];
-  "setsockopt(ROOT) " -> "setsockopt(CERT) ";
-  "setsockopt(ROOT) " -> "setsockopt(ROOT) " [style=dotted];
-  "setsockopt(CERT) " -> "setsockopt(CERT) " [style=dotted, label=SNI];
-  "setsockopt(CERT) " -> "setsockopt(HANDSHAKE)";
-
-  "accept() / accept4()" -> "accept() / accept4()";
   "socket(PROT_TLS)" -> "connect()";
 
-  "connect()" -> "setsockopt(CERT)";
-  "setsockopt(CERT)" -> "setsockopt(ROOT)";
-  "setsockopt(CERT)" -> "setsockopt(NAME)";
+  srv_peer_cert -> "setsockopt(TLS_OPT_HANDSHAKE)";
+  srv_peer_name -> "setsockopt(TLS_OPT_HANDSHAKE)";
+  clt_root_cert -> "setsockopt(TLS_OPT_HANDSHAKE)";
 
-  "connect()" -> "setsockopt(ROOT)";
-  "setsockopt(ROOT)" -> "setsockopt(CERT)";
-  "setsockopt(ROOT)" -> "setsockopt(NAME)";
-  "setsockopt(ROOT)" -> "setsockopt(ROOT)" [style=dotted];
+  "setsockopt(TLS_OPT_HANDSHAKE)" -> "send()" [lhead=cluster_io];
 
-  "connect()" -> "setsockopt(NAME)";
-  "setsockopt(NAME)" -> "setsockopt(CERT)";
-  "setsockopt(NAME)" -> "setsockopt(ROOT)";
-  "setsockopt(NAME)" -> "setsockopt(HANDSHAKE)";
+  "send()" -> "getsockopt(TLS_OPT_SELF_NAME)" [ltail=cluster_io,lhead=cluster_info];
 
-  "setsockopt(HANDSHAKE)" -> "getsockopt(PEER)";
-  "getsockopt(PEER)" -> "write() / send() / read() / recv()";
-  "getsockopt(PEER)" -> "fdopen()";
-  "getsockopt(PEER)" -> "close()";
-
-  "setsockopt(HANDSHAKE)" -> "write() / send() / read() / recv()";
-  "write() / send() / read() / recv()" -> "write() / send() / read() / recv()";
-  "write() / send() / read() / recv()" -> "getsockopt(PEER)";
-  "write() / send() / read() / recv()" -> "fdopen()";
-  "write() / send() / read() / recv()" -> "close()";
-
-  "setsockopt(HANDSHAKE)" -> "close()";
+  "getsockopt(TLS_OPT_SELF_CERT)" -> "close()" [ltail=cluster_info];
 }
