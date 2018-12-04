@@ -17,6 +17,7 @@ be set using `setsockopt()`.
 # Workflow
 
 This directed graph demonstrats the order of calls in order to get a working
-TLS connection on either the server-side or the client-side.
+TLS connection on either the server-side or the client-side. Grey function calls
+are optional and will depend on your application's needs.
 
 ![Workflow](https://g.gravizo.com/source/svg?https%3A%2F%2Fraw.githubusercontent.com%2Fenarx%2Ftlssock%2Fmaster%2Fworkflow.dot)
