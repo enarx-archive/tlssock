@@ -1,6 +1,6 @@
 /*
  * Copyright 2018 Red Hat, Inc.
- * 
+ *
  * Author: Nathaniel McCallum
  *
  * This library is free software; you can redistribute it and/or
@@ -41,6 +41,31 @@
 #define __str(s) #s
 #define _str(s) __str(s)
 #define NEXT(name) ((typeof(name) *) dlsym(RTLD_NEXT, _str(name)))
+
+#define GET_TLS(fn, fd, ...) \
+  tls_auto_t *tls = NULL; \
+  do \
+  { \
+    tls = tls_get(fd, pthread_rwlock_wrlock); \
+    if(tls == NULL) \
+    { \
+      if (errno == ENOTSOCK){ \
+        return NEXT(fn)(fd, ## __VA_ARGS__); \
+      } \
+      return -1; \
+    } \
+    if (tls->state == UNDEFINED){ \
+      return NEXT(fn)(fd, ## __VA_ARGS__); \
+    } \
+  } while(0)
+
+#ifdef DEBUG
+#define TRACE \
+  do { fprintf(stderr, "Entering function %s\n", __func__); } while(0)
+#else
+#define TRACE {}
+#endif
+
 
 #define tls_auto_t tls_t __attribute__((cleanup(tls_rel)))
 
@@ -215,18 +240,22 @@ tls_new(int fd)
 
   pthread_rwlock_wrlock(&idx.rwl);
 
-  if (idx.len < (unsigned int) fd) {
+  /* Need to make sure idx.len is higher than the FD we're trying to get:
+   * idx.len starts at 1 to be valid, fd is 0-indexed. */
+  if((unsigned int) fd >= idx.len) {
     ent_t **ent = NULL;
     size_t len = 0;
 
-    len = (fd + BLOCK - 1) / BLOCK * BLOCK;
+    /* Reserve a slightly larger block to save on realloc requirements */
+    len = (fd + BLOCK - 1);
     ent = realloc(idx.ent, sizeof(ent_t*) * len);
     if (!ent) {
       pthread_rwlock_unlock(&idx.rwl);
       return NULL;
     }
 
-    memset(&idx.ent[idx.len], 0, sizeof(ent_t*) * (len - idx.len));
+    /* Clear the bytes that were just added */
+    memset(&ent[idx.len], 0, sizeof(ent_t*) * (len - idx.len));
     idx.len = len;
     idx.ent = ent;
   }
@@ -265,7 +294,9 @@ tls_get(int fd, int (*lock)(pthread_rwlock_t *rwlock))
   if (lock)
     lock(&idx.rwl);
 
-  if (idx.len < (unsigned int) fd) {
+  /* Need to make sure idx.len is higher than the FD we're trying to get:
+   * idx.len starts at 1 to be valid, fd is 0-indexed. */
+  if((unsigned int) fd >= idx.len) {
     if (lock)
       pthread_rwlock_unlock(&idx.rwl);
     errno = ENOTSOCK;
@@ -373,12 +404,16 @@ notsup(int fd)
 int
 accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
+  TRACE;
+
   return accept4(sockfd, addr, addrlen, 0);
 }
 
 int
 accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
   tls_auto_t *con = NULL;
   int fd;
@@ -425,6 +460,8 @@ close(int fd)
 int
 connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
   int ret;
 
@@ -455,6 +492,10 @@ connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 int
 dup(int oldfd)
 {
+  TRACE;
+
+  GET_TLS(dup, oldfd);
+
   return notsup(oldfd) != 0 ? -1 :
     NEXT(dup)(oldfd);
 }
@@ -462,6 +503,10 @@ dup(int oldfd)
 int
 dup2(int oldfd, int newfd)
 {
+  TRACE;
+
+  GET_TLS(dup2, oldfd, newfd);
+
   return notsup(oldfd) != 0 ? -1 :
     NEXT(dup2)(oldfd, newfd);
 }
@@ -469,6 +514,8 @@ dup2(int oldfd, int newfd)
 FILE *
 fdopen(int fd, const char *mode)
 {
+  TRACE;
+
   return notsup(fd) != 0 ? NULL :
     NEXT(fdopen)(fd, mode);
 }
@@ -476,6 +523,8 @@ fdopen(int fd, const char *mode)
 int
 getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 {
+  TRACE;
+
   // TODO
   return NEXT(getsockopt)(sockfd, level, optname, optval, optlen);
 }
@@ -483,6 +532,8 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 int
 listen(int sockfd, int backlog)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
   int ret;
 
@@ -513,6 +564,8 @@ listen(int sockfd, int backlog)
 ssize_t
 pread(int fd, void *buf, size_t count, off_t offset)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -528,6 +581,8 @@ pread(int fd, void *buf, size_t count, off_t offset)
 ssize_t
 preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -543,6 +598,8 @@ preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 ssize_t
 preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -558,6 +615,8 @@ preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
 ssize_t
 pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -573,6 +632,8 @@ pwrite(int fd, const void *buf, size_t count, off_t offset)
 ssize_t
 pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -588,6 +649,8 @@ pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 ssize_t
 pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(fd, pthread_rwlock_rdlock);
@@ -603,14 +666,9 @@ pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
 ssize_t
 read(int fd, void *buf, size_t count)
 {
-  tls_auto_t *tls = NULL;
+  TRACE;
 
-  tls = tls_get(fd, pthread_rwlock_rdlock);
-  if (!tls)
-    return -1;
-
-  if (tls->state == UNDEFINED)
-    return NEXT(read)(fd, buf, count);
+  GET_TLS(read, fd, buf, count);
 
   return tls_read(tls, buf, count);
 }
@@ -618,14 +676,9 @@ read(int fd, void *buf, size_t count)
 ssize_t
 recv(int sockfd, void *buf, size_t len, int flags)
 {
-  tls_auto_t *tls = NULL;
+  TRACE;
 
-  tls = tls_get(sockfd, pthread_rwlock_rdlock);
-  if (!tls)
-    return -1;
-
-  if (tls->state == UNDEFINED)
-    return NEXT(read)(sockfd, buf, len);
+  GET_TLS(recv, sockfd, buf, len, flags);
 
   return tls_read(tls, buf, len);
 }
@@ -634,6 +687,8 @@ ssize_t
 recvfrom(int sockfd, void *buf, size_t len, int flags,
          struct sockaddr *src_addr, socklen_t *addrlen)
 {
+  TRACE;
+
   if (src_addr == NULL && addrlen == NULL)
     return recv(sockfd, buf, len, flags);
 
@@ -644,6 +699,8 @@ recvfrom(int sockfd, void *buf, size_t len, int flags,
 ssize_t
 recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
+  TRACE;
+
   return notsup(sockfd) != 0 ? -1 :
     NEXT(recvmsg)(sockfd, msg, flags);
 }
@@ -651,6 +708,8 @@ recvmsg(int sockfd, struct msghdr *msg, int flags)
 ssize_t
 send(int sockfd, const void *buf, size_t len, int flags)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
 
   tls = tls_get(sockfd, pthread_rwlock_rdlock);
@@ -667,6 +726,8 @@ ssize_t
 sendto(int sockfd, const void *buf, size_t len, int flags,
        const struct sockaddr *dest_addr, socklen_t addrlen)
 {
+  TRACE;
+
   if (dest_addr == NULL && addrlen == 0)
     return send(sockfd, buf, len, flags);
 
@@ -677,6 +738,8 @@ sendto(int sockfd, const void *buf, size_t len, int flags,
 ssize_t
 sendmsg(int sockfd, const struct msghdr *msg, int flags)
 {
+  TRACE;
+
   return notsup(sockfd) != 0 ? -1 :
     NEXT(sendmsg)(sockfd, msg, flags);
 }
@@ -684,6 +747,8 @@ sendmsg(int sockfd, const struct msghdr *msg, int flags)
 static ssize_t
 pull_func(gnutls_transport_ptr_t ptr, void *buf, size_t count)
 {
+  TRACE;
+
   int fd = (uintptr_t) ptr;
   return NEXT(read)(fd, buf, count);
 }
@@ -691,6 +756,8 @@ pull_func(gnutls_transport_ptr_t ptr, void *buf, size_t count)
 static ssize_t
 push_func(gnutls_transport_ptr_t ptr, const void *buf, size_t count)
 {
+  TRACE;
+
   int fd = (uintptr_t) ptr;
   return NEXT(write)(fd, buf, count);
 }
@@ -698,6 +765,8 @@ push_func(gnutls_transport_ptr_t ptr, const void *buf, size_t count)
 static ssize_t
 vec_push_func(gnutls_transport_ptr_t ptr, const giovec_t *iov, int iovcnt)
 {
+  TRACE;
+
   int fd = (uintptr_t) ptr;
   return NEXT(writev)(fd, iov, iovcnt);
 }
@@ -705,6 +774,8 @@ vec_push_func(gnutls_transport_ptr_t ptr, const giovec_t *iov, int iovcnt)
 static int
 pull_timeout_func(gnutls_transport_ptr_t ptr, unsigned int ms)
 {
+  TRACE;
+
   struct pollfd fd = { (uintptr_t) ptr, POLLIN | POLLPRI };
   int timeout = 0;
 
@@ -722,6 +793,8 @@ int
 setsockopt(int sockfd, int level, int optname,
            const void *optval, socklen_t optlen)
 {
+  TRACE;
+
   tls_opt_t opt = optname;
   tls_auto_t *tls = NULL;
   creds_t *creds;
@@ -854,6 +927,8 @@ setsockopt(int sockfd, int level, int optname,
 int
 shutdown(int sockfd, int how)
 {
+  TRACE;
+
   gnutls_close_request_t ghow;
   tls_auto_t *tls = NULL;
   int ret = 0;
@@ -900,6 +975,8 @@ shutdown(int sockfd, int how)
 int
 socket(int domain, int type, int protocol)
 {
+  TRACE;
+
   tls_auto_t *tls = NULL;
   int flags = 0;
   int fd = -1;
@@ -923,13 +1000,13 @@ socket(int domain, int type, int protocol)
   if (fd < 0)
     return fd;
 
-  tls = tls_new(fd);
-  if (!tls) {
-    close(fd);
-    return -1;
-  }
-
   if (protocol == PROT_TLS) {
+    tls = tls_new(fd);
+    if (!tls) {
+      close(fd);
+      return -1;
+    }
+
     tls->created.flags = flags;
     tls->state = CREATED;
   }
@@ -940,14 +1017,9 @@ socket(int domain, int type, int protocol)
 ssize_t
 write(int fd, const void *buf, size_t count)
 {
-  tls_auto_t *tls = NULL;
+  TRACE;
 
-  tls = tls_get(fd, pthread_rwlock_rdlock);
-  if (!tls)
-    return -1;
-
-  if (tls->state == UNDEFINED)
-    return NEXT(write)(fd, buf, count);
+  GET_TLS(write, fd, buf, count);
 
   return tls_write(tls, buf, count);
 }
