@@ -1,37 +1,27 @@
-/* 
+/*
  * Copyright 2018 Red Hat, Inc.
  * 
  * Author: Nathaniel McCallum
  *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE X CONSORTIUM BE LIABLE FOR ANY
- * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * Except as contained in this notice, the name(s) of the above copyright
- * holders shall not be used in advertising or otherwise to promote the sale,
- * use or other dealings in this Software without prior written
- * authorization.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #define _GNU_SOURCE
 #include "tlssock.h"
 
-#include <openssl/ssl.h>
+#include <gnutls/gnutls.h>
 #include <pthread.h>
 
 #include <sys/types.h>
@@ -42,6 +32,11 @@
 #include <errno.h>
 #include <string.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <poll.h>
+#include <limits.h>
 
 #define __str(s) #s
 #define _str(s) __str(s)
@@ -52,31 +47,59 @@
 typedef enum {
   UNDEFINED = 0,
   CREATED,
+  LISTENING,
   ACCEPTED,
   CONNECTED,
   ESTABLISHED,
   SHUTDOWN,
 } state_t;
 
+typedef enum {
+  CRED_TYPE_ANON,
+} cred_type_t;
+
 typedef struct {
-  const SSL_METHOD *method;
+  gnutls_certificate_credentials_t cert;
+
+  struct {
+    gnutls_anon_client_credentials_t anon;
+    gnutls_psk_client_credentials_t psk;
+    gnutls_srp_client_credentials_t srp;
+  } clt;
+
+  struct {
+    gnutls_anon_server_credentials_t anon;
+    gnutls_psk_server_credentials_t psk;
+    gnutls_srp_server_credentials_t srp;
+  } srv;
+} creds_t;
+
+typedef struct {
+  int flags;
 } created_t;
 
 typedef struct {
-  SSL_CTX *ctx;
+  int flags;
+} listening_t;
+
+typedef struct {
+  int flags;
+  creds_t creds;
 } accepted_t;
 
 typedef struct {
-  SSL_CTX *ctx;
-  char *name;
+  int flags;
+  creds_t creds;
 } connected_t;
 
 typedef struct {
-  SSL *ssl;
+  gnutls_session_t session;
+  creds_t creds;
 } established_t;
 
 typedef struct {
-  SSL *ssl;
+  gnutls_session_t session;
+  creds_t creds;
 } shutdown_t;
 
 typedef struct {
@@ -84,6 +107,7 @@ typedef struct {
 
   union {
     created_t created;
+    listening_t listening;
     accepted_t accepted;
     connected_t connected;
     established_t established;
@@ -109,6 +133,32 @@ err(int errnum)
   return -1;
 }
 
+static inline int
+gnutls2errno(int ret)
+{
+  switch (ret) {
+  case GNUTLS_E_SUCCESS:      return 0;
+  case GNUTLS_E_AGAIN:        return err(EAGAIN);
+  case GNUTLS_E_INTERRUPTED:  return err(EINTR);
+  case GNUTLS_E_LARGE_PACKET: return err(EMSGSIZE);
+  default: return gnutls_error_is_fatal(ret) ? err(EIO) : 0; // FIXME
+  }
+}
+
+static void
+creds_clr(creds_t *creds)
+{
+  gnutls_certificate_free_credentials(creds->cert);
+  gnutls_anon_free_client_credentials(creds->clt.anon);
+  gnutls_psk_free_client_credentials(creds->clt.psk);
+  gnutls_srp_free_client_credentials(creds->clt.srp);
+  gnutls_anon_free_server_credentials(creds->srv.anon);
+  gnutls_psk_free_server_credentials(creds->srv.psk);
+  gnutls_srp_free_server_credentials(creds->srv.srp);
+
+  memset(creds, 0, sizeof(*creds));
+}
+
 static void
 tls_rel(tls_t **tls)
 {
@@ -127,24 +177,26 @@ tls_clr(tls_t *tls)
 {
   switch (tls->state) {
   case UNDEFINED:
+  case LISTENING:
   case CREATED:
     break;
 
-  case ACCEPTED:
-    SSL_CTX_free(tls->accepted.ctx);
+  case CONNECTED:
+    creds_clr(&tls->connected.creds);
     break;
 
-  case CONNECTED:
-    SSL_CTX_free(tls->connected.ctx);
-    free(tls->connected.name);
+  case ACCEPTED:
+    creds_clr(&tls->accepted.creds);
     break;
 
   case ESTABLISHED:
-    SSL_free(tls->established.ssl);
+    gnutls_deinit(tls->established.session);
+    creds_clr(&tls->established.creds);
     break;
 
   case SHUTDOWN:
-    SSL_free(tls->shutdown.ssl);
+    gnutls_deinit(tls->shutdown.session);
+    creds_clr(&tls->shutdown.creds);
     break;
   }
 
@@ -256,7 +308,7 @@ tls_del(int fd, bool lock)
 static ssize_t
 tls_read(tls_t *tls, void *buf, size_t count)
 {
-  int ret = 0;
+  ssize_t ret = 0;
 
   switch (tls->state) {
   case ESTABLISHED:
@@ -264,29 +316,18 @@ tls_read(tls_t *tls, void *buf, size_t count)
 
   case UNDEFINED:
   case CREATED:
+  case LISTENING:
   case ACCEPTED:
   case CONNECTED:
   case SHUTDOWN:
     return err(EBADFD); // FIXME
   }
 
-  if (count > INT_MAX)
-    return err(EINVAL); // FIXME
-
-  ret = SSL_read(tls->established.ssl, buf, count);
-  if (ret > 0)
+  ret = gnutls_record_recv(tls->established.session, buf, count);
+  if (ret >= 0)
     return ret;
 
-  switch (SSL_get_error(tls->established.ssl, ret)) {
-  case SSL_ERROR_WANT_READ:
-  case SSL_ERROR_WANT_WRITE:
-    return err(EAGAIN); // FIXME
-
-  // TODO: others
-
-  default:
-    return err(EIO); // FIXME
-  }
+  return gnutls_error_is_fatal(ret) ? gnutls2errno(ret) : -1;
 }
 
 static ssize_t
@@ -300,29 +341,18 @@ tls_write(tls_t *tls, const void *buf, size_t count)
 
   case UNDEFINED:
   case CREATED:
+  case LISTENING:
   case ACCEPTED:
   case CONNECTED:
   case SHUTDOWN:
     return err(EBADFD); // FIXME
   }
 
-  if (count > INT_MAX)
-    return err(EINVAL); // FIXME
-
-  ret = SSL_write(tls->established.ssl, buf, count);
-  if (ret <= 0)
+  ret = gnutls_record_send(tls->established.session, buf, count);
+  if (ret >= 0)
     return ret;
 
-  switch (SSL_get_error(tls->established.ssl, ret)) {
-  case SSL_ERROR_WANT_READ:
-  case SSL_ERROR_WANT_WRITE:
-    return err(EAGAIN); // FIXME
-
-  // TODO: others
-
-  default:
-    return err(EIO); // FIXME
-  }
+  return gnutls_error_is_fatal(ret) ? gnutls2errno(ret) : -1;
 }
 
 static inline int
@@ -351,7 +381,6 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 {
   tls_auto_t *tls = NULL;
   tls_auto_t *con = NULL;
-  SSL_CTX *ssl = NULL;
   int fd;
 
   tls = tls_get(sockfd, pthread_rwlock_rdlock);
@@ -359,38 +388,28 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
     return -1;
 
   switch (tls->state) {
-  case UNDEFINED:
-    break;
-
-  case CREATED:
-    ssl = SSL_CTX_new(tls->created.method);
-    if (!ssl)
-      return err(ENOMEM);
-    break;
-
-  case ACCEPTED:
-  case SHUTDOWN:
-  case CONNECTED:
-  case ESTABLISHED:
-    return err(EBADFD); // FIXME
+  case UNDEFINED:   break;
+  case CREATED:     return err(EBADFD); // FIXME
+  case LISTENING:   break;
+  case ACCEPTED:    return err(EBADFD); // FIXME
+  case SHUTDOWN:    return err(EBADFD); // FIXME
+  case CONNECTED:   return err(EBADFD); // FIXME
+  case ESTABLISHED: return err(EBADFD); // FIXME
   }
 
   fd = NEXT(accept4)(sockfd, addr, addrlen, flags);
-  if (fd < 0) {
-    SSL_CTX_free(ssl);
+  if (fd < 0)
     return fd;
-  }
 
   con = tls_new(fd);
   if (!con) {
-    SSL_CTX_free(ssl);
     close(fd);
     return -1;
   }
 
-  if (tls->state == CREATED) {
+  if (tls->state == LISTENING) {
+    con->accepted.flags = tls->listening.flags;
     con->state = ACCEPTED;
-    con->accepted.ctx = ssl;
   }
 
   return fd;
@@ -407,7 +426,6 @@ int
 connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
   tls_auto_t *tls = NULL;
-  SSL_CTX *ctx = NULL;
   int ret;
 
   tls = tls_get(sockfd, pthread_rwlock_rdlock);
@@ -415,33 +433,23 @@ connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     return -1;
 
   switch (tls->state) {
-  case UNDEFINED:
-    return NEXT(connect)(sockfd, addr, addrlen);
-
-  case CREATED:
-    ctx = SSL_CTX_new(tls->created.method);
-    if (!ctx)
-      return err(ENOMEM);
-
-    ret = NEXT(connect)(sockfd, addr, addrlen);
-    if (ret < 0) {
-      SSL_CTX_free(ctx);
-      return ret;
-    }
-
-    tls->state = CONNECTED;
-    tls->connected.ctx = ctx;
-
-    return ret;
-
-  case ACCEPTED:
-  case SHUTDOWN:
-  case CONNECTED:
-  case ESTABLISHED:
-    return err(EBADFD); // FIXME
+  case UNDEFINED:   return NEXT(connect)(sockfd, addr, addrlen);
+  case CREATED:     break;
+  case LISTENING:   return err(EBADFD); // FIXME
+  case ACCEPTED:    return err(EBADFD); // FIXME
+  case SHUTDOWN:    return err(EBADFD); // FIXME
+  case CONNECTED:   return err(EBADFD); // FIXME
+  case ESTABLISHED: return err(EBADFD); // FIXME
   }
 
-  abort();
+  ret = NEXT(connect)(sockfd, addr, addrlen);
+
+  if (ret == 0) {
+    tls->connected.flags = tls->created.flags | GNUTLS_CLIENT;
+    tls->state = CONNECTED;
+  }
+
+  return ret;
 }
 
 int
@@ -470,6 +478,126 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 {
   // TODO
   return NEXT(getsockopt)(sockfd, level, optname, optval, optlen);
+}
+
+int
+listen(int sockfd, int backlog)
+{
+  tls_auto_t *tls = NULL;
+  int ret;
+
+  tls = tls_get(sockfd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  switch (tls->state) {
+  case UNDEFINED:   return NEXT(listen)(sockfd, backlog);
+  case CREATED:     break;
+  case LISTENING:   return err(EBADFD); // FIXME
+  case ACCEPTED:    return err(EBADFD); // FIXME
+  case SHUTDOWN:    return err(EBADFD); // FIXME
+  case CONNECTED:   return err(EBADFD); // FIXME
+  case ESTABLISHED: return err(EBADFD); // FIXME
+  }
+
+  ret = NEXT(listen)(sockfd, backlog);
+
+  if (ret == 0) {
+    tls->listening.flags = tls->created.flags | GNUTLS_SERVER;
+    tls->state = LISTENING;
+  }
+
+  return ret;
+}
+
+ssize_t
+pread(int fd, void *buf, size_t count, off_t offset)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(pread)(fd, buf, count, offset);
+
+  return err(ENOSYS); // TODO
+}
+
+ssize_t
+preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(preadv)(fd, iov, iovcnt, offset);
+
+  return err(ENOSYS); // TODO
+}
+
+ssize_t
+preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(preadv2)(fd, iov, iovcnt, offset, flags);
+
+  return err(ENOSYS); // TODO
+}
+
+ssize_t
+pwrite(int fd, const void *buf, size_t count, off_t offset)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(pwrite)(fd, buf, count, offset);
+
+  return err(ENOSYS); // TODO
+}
+
+ssize_t
+pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(pwritev)(fd, iov, iovcnt, offset);
+
+  return err(ENOSYS); // TODO
+}
+
+ssize_t
+pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
+{
+  tls_auto_t *tls = NULL;
+
+  tls = tls_get(fd, pthread_rwlock_rdlock);
+  if (!tls)
+    return -1;
+
+  if (tls->state == UNDEFINED)
+    return NEXT(pwritev2)(fd, iov, iovcnt, offset, flags);
+
+  return err(ENOSYS); // TODO
 }
 
 ssize_t
@@ -553,12 +681,52 @@ sendmsg(int sockfd, const struct msghdr *msg, int flags)
     NEXT(sendmsg)(sockfd, msg, flags);
 }
 
+static ssize_t
+pull_func(gnutls_transport_ptr_t ptr, void *buf, size_t count)
+{
+  int fd = (uintptr_t) ptr;
+  return NEXT(read)(fd, buf, count);
+}
+
+static ssize_t
+push_func(gnutls_transport_ptr_t ptr, const void *buf, size_t count)
+{
+  int fd = (uintptr_t) ptr;
+  return NEXT(write)(fd, buf, count);
+}
+
+static ssize_t
+vec_push_func(gnutls_transport_ptr_t ptr, const giovec_t *iov, int iovcnt)
+{
+  int fd = (uintptr_t) ptr;
+  return NEXT(writev)(fd, iov, iovcnt);
+}
+
+static int
+pull_timeout_func(gnutls_transport_ptr_t ptr, unsigned int ms)
+{
+  struct pollfd fd = { (uintptr_t) ptr, POLLIN | POLLPRI };
+  int timeout = 0;
+
+  if (ms == GNUTLS_INDEFINITE_TIMEOUT)
+    timeout = -1;
+  else if (ms > INT_MAX)
+    timeout = INT_MAX;
+  else
+    timeout = ms;
+
+  return poll(&fd, 1, timeout);
+}
+
 int
 setsockopt(int sockfd, int level, int optname,
            const void *optval, socklen_t optlen)
 {
-  tls_auto_t *tls = NULL;
   tls_opt_t opt = optname;
+  tls_auto_t *tls = NULL;
+  creds_t *creds;
+  bool client;
+  int ret;
 
   if (level != PROT_TLS)
     return NEXT(setsockopt)(sockfd, level, optname, optval, optlen);
@@ -568,99 +736,116 @@ setsockopt(int sockfd, int level, int optname,
     return -1;
 
   switch (tls->state) {
-  case ACCEPTED:
-    switch (opt) {
-    case TLS_OPT_HANDSHAKE:
-      return err(ENOSYS); // TODO
+  case CONNECTED:   client = true;  creds = &tls->connected.creds; break;
+  case ACCEPTED:    client = false; creds = &tls->accepted.creds;  break;
+  case CREATED:     return err(EBADFD); // FIXME
+  case SHUTDOWN:    return err(EBADFD); // FIXME
+  case LISTENING:   return err(EBADFD); // FIXME
+  case UNDEFINED:   return err(EBADFD); // FIXME
+  case ESTABLISHED: return err(EBADFD); // FIXME
+  }
 
-    case TLS_OPT_SELF_KEY:
-      return err(ENOSYS); // TODO
+  switch (opt) {
+  case TLS_OPT_PEER_NAME:
+    return err(ENOSYS); // TODO
 
-    case TLS_OPT_SELF_CERT:
-      return err(ENOSYS); // TODO
-
-    case TLS_OPT_ROOT_CERT:
-      return err(ENOSYS); // TODO
-
-    case TLS_OPT_SELF_NAME:
-    case TLS_OPT_PEER_NAME:
-    case TLS_OPT_PEER_CERT:
-      return err(ENOTSUP); // FIXME
-
-    default:
-      return err(EINVAL); // FIXME
+  case TLS_OPT_PEER_CERT:
+    if (!creds->cert) {
+      ret = gnutls2errno(gnutls_certificate_allocate_credentials(&creds->cert));
+      if (ret != 0)
+        return ret;
     }
 
-  case CONNECTED:
-    switch (opt) {
-    case TLS_OPT_HANDSHAKE: {
-      SSL *ssl = NULL;
-      int ret = -1;
+    return err(ENOSYS); // TODO
 
-      if (optval != NULL)
+  case TLS_OPT_SELF_CERT:
+    if (!creds->cert) {
+      ret = gnutls2errno(gnutls_certificate_allocate_credentials(&creds->cert));
+      if (ret != 0)
+        return ret;
+    }
+
+    return err(ENOSYS); // TODO
+
+  case TLS_OPT_SELF_ANON:
+    if (client) {
+      if (creds->clt.anon)
+        return 0;
+
+      ret = gnutls_anon_allocate_client_credentials(&creds->clt.anon);
+    } else {
+      if (creds->srv.anon)
+        return 0;
+
+      ret = gnutls_anon_allocate_server_credentials(&creds->srv.anon);
+    }
+
+    return gnutls2errno(ret);
+
+  case TLS_OPT_HANDSHAKE: {
+    int flags = client ? tls->connected.flags : tls->accepted.flags;
+    unsigned int ms = GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT;
+    gnutls_session_t session = NULL;
+    const unsigned int *v = optval;
+
+    if (v) {
+      if (optlen != sizeof(*v))
         return err(EINVAL);
 
-      SSL_CTX_set_verify(tls->connected.ctx, SSL_VERIFY_PEER, NULL);
-
-      ssl = SSL_new(tls->connected.ctx);
-      if (!ssl)
-        return err(ENOMEM);
-
-      if (SSL_set_tlsext_host_name(ssl, tls->connected.name) != 0) {
-        SSL_free(ssl);
-        return err(EINVAL); // FIXME
-      }
-
-      SSL_CTX_free(tls->accepted.ctx);
-      tls->state = ESTABLISHED;
-      tls->established.ssl = ssl;
-
-      ret = SSL_connect(ssl);
-      if (ret != 1) {
-        switch (SSL_get_error(ssl, ret)) {
-        case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_WRITE:
-          return err(EAGAIN); // FIXME
-
-        default:
-          return err(ENOKEY); // FIXME
-        }
-      }
-
-      if (SSL_do_handshake(ssl) != 0)
-        return err(EINVAL); // FIXME
-
-      // TODO: certificate validation
-
-      return 0;
+      ms = *v;
     }
 
-    case TLS_OPT_SELF_KEY:
-      return err(ENOSYS); // TODO
+    ret = gnutls_init(&session, flags);
 
-    case TLS_OPT_SELF_CERT:
-      return err(ENOSYS); // TODO
+    if (ret == GNUTLS_E_SUCCESS) {
+      uintptr_t fd = sockfd;
 
-    case TLS_OPT_ROOT_CERT:
-      return err(ENOSYS); // TODO
-
-    case TLS_OPT_PEER_NAME:
-      tls->connected.name = strndup(optval, optlen);
-      return tls->connected.name ? 0 : -1;
-
-    case TLS_OPT_SELF_NAME:
-    case TLS_OPT_PEER_CERT:
-      return err(ENOTSUP); // FIXME
-
-    default:
-      return err(EINVAL); // FIXME
+      gnutls_transport_set_ptr(session, (gnutls_transport_ptr_t) fd);
+      gnutls_transport_set_pull_function(session, pull_func);
+      gnutls_transport_set_push_function(session, push_func);
+      gnutls_transport_set_vec_push_function(session, vec_push_func);
+      gnutls_transport_set_pull_timeout_function(session, pull_timeout_func);
+      gnutls_handshake_set_timeout(session, ms);
     }
 
-  case CREATED:
-  case SHUTDOWN:
-  case UNDEFINED:
-  case ESTABLISHED:
-    return err(EBADFD); // FIXME
+    if (ret == GNUTLS_E_SUCCESS && creds->cert)
+      ret = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, creds->cert);
+
+    if (client) {
+      if (ret == GNUTLS_E_SUCCESS && creds->clt.anon)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_ANON, creds->clt.anon);
+
+      if (ret == GNUTLS_E_SUCCESS && creds->clt.psk)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, creds->clt.psk);
+
+      if (ret == GNUTLS_E_SUCCESS && creds->clt.srp)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_SRP, creds->clt.srp);
+    } else {
+      if (ret == GNUTLS_E_SUCCESS && creds->srv.anon)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_ANON, creds->srv.anon);
+
+      if (ret == GNUTLS_E_SUCCESS && creds->srv.psk)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, creds->srv.psk);
+
+      if (ret == GNUTLS_E_SUCCESS && creds->srv.srp)
+        ret = gnutls_credentials_set(session, GNUTLS_CRD_SRP, creds->srv.srp);
+    }
+
+    if (ret == GNUTLS_E_SUCCESS)
+      ret = gnutls_handshake(session);
+
+    if (gnutls2errno(ret) != 0)
+      return -1;
+
+    tls->established.creds = *creds;
+    tls->established.session = session;
+    tls->state = ESTABLISHED;
+
+    return 0;
+  }
+
+  default:
+    return err(EINVAL); // FIXME
   }
 
   abort();
@@ -669,77 +854,69 @@ setsockopt(int sockfd, int level, int optname,
 int
 shutdown(int sockfd, int how)
 {
+  gnutls_close_request_t ghow;
   tls_auto_t *tls = NULL;
-  int ret;
+  int ret = 0;
 
   tls = tls_get(sockfd, pthread_rwlock_rdlock);
   if (!tls)
     return -1;
 
   switch (tls->state) {
-  case ESTABLISHED:
-  case SHUTDOWN:
-    if (how != SHUT_RDWR)
-      return err(EINVAL);
-
-    if (tls->state == ESTABLISHED) {
-      ret = SSL_shutdown(tls->established.ssl);
-      if (ret < 0) {
-        switch (SSL_get_error(tls->established.ssl, ret)) {
-        case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_WRITE:
-          return err(EAGAIN); // FIXME
-
-        // TODO: others
-
-        default:
-          return err(EIO); // FIXME
-        }
-      }
-
-      tls->shutdown.ssl = tls->established.ssl;
-      tls->state = SHUTDOWN;
-    }
-
-    return NEXT(shutdown)(sockfd, how);
-
-  case ACCEPTED:
-  case CONNECTED:
-    if (how != SHUT_RDWR)
-      return err(EINVAL);
-
-    tls_clr(tls);
-    return NEXT(shutdown)(sockfd, how);
-
-  case CREATED:
-    return err(ENOTCONN);
-
   case UNDEFINED:
+  case SHUTDOWN:
     return NEXT(shutdown)(sockfd, how);
+
+  case LISTENING:
+  case CONNECTED:
+  case ACCEPTED:
+  case CREATED:
+    tls_clr(tls);
+    tls->state = SHUTDOWN;
+    return NEXT(shutdown)(sockfd, how);
+
+  case ESTABLISHED:
+    break;
   }
 
-  abort();
+  switch (how) {
+  case SHUT_RD:   return err(ENOTSUP);
+  case SHUT_WR:   ghow = GNUTLS_SHUT_WR; break;
+  case SHUT_RDWR: ghow = GNUTLS_SHUT_RDWR; break;
+  default:        return err(EINVAL);
+  }
+
+  ret = gnutls2errno(gnutls_bye(tls->established.session, ghow));
+
+  if (ret == 0) {
+    tls->shutdown.session = tls->established.session;
+    tls->shutdown.creds = tls->established.creds;
+    tls->state = SHUTDOWN;
+  }
+
+  return ret;
 }
 
 int
 socket(int domain, int type, int protocol)
 {
-  const SSL_METHOD *method = NULL;
   tls_auto_t *tls = NULL;
+  int flags = 0;
   int fd = -1;
 
   if (protocol == PROT_TLS) {
-    switch (domain) {
-    case AF_INET6: break;
-    case AF_INET: break;
-    default: return err(EPROTONOSUPPORT);
-    }
+    int noflags = type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
 
-    switch (type) {
-    case SOCK_STREAM: method = TLS_method(); break;
-    case SOCK_DGRAM: method = DTLS_method(); break;
-    default: return err(EPROTONOSUPPORT);
-    }
+    if (domain != AF_INET6 && domain != AF_INET)
+      return err(EPROTONOSUPPORT);
+
+    if (type & SOCK_NONBLOCK)
+      flags |= GNUTLS_NONBLOCK;
+
+    if (noflags == SOCK_DGRAM)
+      flags |= GNUTLS_DATAGRAM;
+    else if (noflags != SOCK_STREAM)
+      return err(EPROTONOSUPPORT);
   }
 
   fd = NEXT(socket)(domain, type, protocol == PROT_TLS ? 0 : protocol);
@@ -753,7 +930,7 @@ socket(int domain, int type, int protocol)
   }
 
   if (protocol == PROT_TLS) {
-    tls->created.method = method;
+    tls->created.flags = flags;
     tls->state = CREATED;
   }
 

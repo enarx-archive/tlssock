@@ -24,12 +24,13 @@ digraph Workflow {
   subgraph cluster_srv {
     label=Server;
 
+    srv_bind [label="bind()"];
     srv_self_cert [label="setsockopt(SELF_CERT)"];
     srv_peer_name [label="setsockopt(PEER_NAME)",style="rounded,filled"];
     srv_peer_cert [label="setsockopt(PEER_CERT)",style="rounded,filled"];
     srv_root_cert [label="setsockopt(ROOT_CERT)",style="rounded,filled"];
 
-    "bind()" -> "listen()";
+    srv_bind -> "listen()";
 
     "listen()" -> "accept()";
     "accept()" -> "accept()" [label=" main loop "];
@@ -47,16 +48,20 @@ digraph Workflow {
 
     srv_peer_name -> srv_root_cert;
     srv_root_cert -> srv_peer_name;
+
+    srv_root_cert -> srv_root_cert;
   }
 
   subgraph cluster_clt {
     label=Client;
 
+    clt_bind [label="bind()",style="rounded,filled"];
     clt_peer_name [label="setsockopt(PEER_NAME)"];
     clt_peer_cert [label="setsockopt(PEER_CERT)"];
     clt_self_cert [label="setsockopt(SELF_CERT)",style="rounded,filled"];
     clt_root_cert [label="setsockopt(ROOT_CERT)",style="rounded,filled"];
 
+    clt_bind -> "connect()";
     "connect()" -> clt_peer_cert;
     clt_peer_cert -> clt_self_cert;
 
@@ -64,18 +69,20 @@ digraph Workflow {
     clt_peer_name -> clt_root_cert;
     clt_peer_name -> clt_self_cert;
     clt_root_cert -> clt_self_cert;
+
+    clt_root_cert -> clt_root_cert;
   }
 
-  "socket(PROT_TLS)" -> "bind()";
-  "socket(PROT_TLS)" -> "connect()";
+  "socket(PROT_TLS)" -> srv_bind;
+  "socket(PROT_TLS)" -> clt_bind;
 
   srv_self_cert -> "setsockopt(HANDSHAKE)" [ltail=cluster_srv];
   clt_self_cert -> "setsockopt(HANDSHAKE)" [ltail=cluster_clt];
 
 
-  "setsockopt(HANDSHAKE)" -> "recv()" [lhead=cluster_io];
+  "setsockopt(HANDSHAKE)" -> "write()" [lhead=cluster_io];
 
-  "recv()" -> "getsockopt(SELF_NAME)" [ltail=cluster_io,lhead=cluster_info];
+  "write()" -> "getsockopt(SELF_NAME)" [ltail=cluster_io,lhead=cluster_info];
 
   "getsockopt(SELF_CERT)" -> "close()" [ltail=cluster_info];
 }

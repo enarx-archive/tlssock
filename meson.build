@@ -32,15 +32,15 @@ add_project_arguments(
 subdir('tests')
 
 cc = meson.get_compiler('c')
-
-threads = dependency('threads')
 dl = cc.find_library('dl', required: false)
-openssl = dependency('openssl', version: '>=1.1')
+
+gnutls = dependency('gnutls', version: '>=3.0.0')
+threads = dependency('threads')
 
 install_headers('tlssock.h')
 libtlssock = shared_library('tlssock',
   'tlssock.c', 'tlssock.h',
-  dependencies: [threads, dl, openssl],
+  dependencies: [gnutls, threads, dl],
   install: true,
 )
 

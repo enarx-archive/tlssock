@@ -20,11 +20,23 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+static in_port_t
+rport(void)
+{
+  static const in_port_t max = UINT16_MAX;
+  static const in_port_t min = 1024;
+  return htons(rand() % (max - min) + min);
+}
 
 static void
 test_errno(int expected)
@@ -36,29 +48,34 @@ test_errno(int expected)
   }
 }
 
+typedef union {
+    struct sockaddr_in6 in6;
+    struct sockaddr_in in;
+    struct sockaddr addr;
+} sockaddr_t;
+
 static void
-test(int domain, int type)
+test(int type, const struct sockaddr *addr, socklen_t addrlen)
 {
   int fd;
 
-  fd = socket(domain, type, 0);
+  fd = socket(addr->sa_family, type, 0);
   assert(fd >= 0);
 
-  assert(shutdown(fd, SHUT_RDWR) == -1);
-  test_errno(ENOTCONN);
+  assert(bind(fd, addr, addrlen) == 0);
+  assert(bind(fd, addr, addrlen) == -1);
+  test_errno(EINVAL);
+
+  close(fd);
 }
 
 int
 main(int argc, const char *argv[])
 {
-  assert(shutdown(-1, SHUT_RDWR) == -1);
-  test_errno(EBADF);
-
-  assert(shutdown(1011, SHUT_RDWR) == -1);
-  test_errno(EBADF);
-
-  test(AF_INET, SOCK_STREAM);
-  test(AF_INET, SOCK_DGRAM);
-  test(AF_INET6, SOCK_STREAM);
-  test(AF_INET6, SOCK_DGRAM);
+  sockaddr_t in6 = { .in6 = { AF_INET6, rport(), .sin6_addr = IN6ADDR_LOOPBACK_INIT } };
+  sockaddr_t in = { .in = { AF_INET, rport(), { htonl(INADDR_LOOPBACK) } } };
+  test(SOCK_STREAM, &in.addr, sizeof(in.in));
+  test(SOCK_DGRAM, &in.addr, sizeof(in.in));
+  test(SOCK_STREAM, &in6.addr, sizeof(in6.in6));
+  test(SOCK_DGRAM, &in6.addr, sizeof(in6.in6));
 }
