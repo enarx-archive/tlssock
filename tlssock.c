@@ -215,18 +215,18 @@ tls_new(int fd)
 
   pthread_rwlock_wrlock(&idx.rwl);
 
-  if (idx.len < (unsigned int) fd) {
+  if (idx.len <= (unsigned int) fd) {
     ent_t **ent = NULL;
     size_t len = 0;
 
-    len = (fd + BLOCK - 1) / BLOCK * BLOCK;
+    len = (fd + BLOCK) / BLOCK * BLOCK;
     ent = realloc(idx.ent, sizeof(ent_t*) * len);
     if (!ent) {
       pthread_rwlock_unlock(&idx.rwl);
       return NULL;
     }
 
-    memset(&idx.ent[idx.len], 0, sizeof(ent_t*) * (len - idx.len));
+    memset(&ent[idx.len], 0, sizeof(ent_t*) * (len - idx.len));
     idx.len = len;
     idx.ent = ent;
   }
@@ -265,7 +265,7 @@ tls_get(int fd, int (*lock)(pthread_rwlock_t *rwlock))
   if (lock)
     lock(&idx.rwl);
 
-  if (idx.len < (unsigned int) fd) {
+  if (idx.len <= (unsigned int) fd) {
     if (lock)
       pthread_rwlock_unlock(&idx.rwl);
     errno = ENOTSOCK;
