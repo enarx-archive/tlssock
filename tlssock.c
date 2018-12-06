@@ -1,6 +1,6 @@
 /*
  * Copyright 2018 Red Hat, Inc.
- * 
+ *
  * Author: Nathaniel McCallum
  *
  * This library is free software; you can redistribute it and/or
@@ -806,6 +806,7 @@ setsockopt(int sockfd, int level, int optname,
       gnutls_transport_set_vec_push_function(session, vec_push_func);
       gnutls_transport_set_pull_timeout_function(session, pull_timeout_func);
       gnutls_handshake_set_timeout(session, ms);
+      gnutls_set_default_priority(session);
     }
 
     if (ret == GNUTLS_E_SUCCESS && creds->cert)
