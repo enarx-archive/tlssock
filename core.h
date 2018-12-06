@@ -1,6 +1,6 @@
 /*
  * Copyright 2018 Red Hat, Inc.
- * 
+ *
  * Author: Nathaniel McCallum
  *
  * This library is free software; you can redistribute it and/or
@@ -20,16 +20,9 @@
 
 #pragma once
 
-#define PROT_TLS_CLIENT 253
-#define PROT_TLS_SERVER 254
+#define _GNU_SOURCE
+#include <dlfcn.h>
 
-typedef enum {
-  TLS_OPT_HANDSHAKE = 0,
-
-  TLS_OPT_PEER_NAME,
-  TLS_OPT_PEER_CERT,
-
-  TLS_OPT_SELF_NAME,
-  TLS_OPT_SELF_CERT,
-  TLS_OPT_SELF_ANON,
-} tls_opt_t;
+#define __str(s) #s
+#define _str(s) __str(s)
+#define NEXT(name) ((typeof(name) *) dlsym(RTLD_NEXT, _str(name)))

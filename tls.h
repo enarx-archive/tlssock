@@ -1,6 +1,6 @@
 /*
  * Copyright 2018 Red Hat, Inc.
- * 
+ *
  * Author: Nathaniel McCallum
  *
  * This library is free software; you can redistribute it and/or
@@ -20,16 +20,37 @@
 
 #pragma once
 
-#define PROT_TLS_CLIENT 253
-#define PROT_TLS_SERVER 254
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <stdbool.h>
 
-typedef enum {
-  TLS_OPT_HANDSHAKE = 0,
+#define tls_auto_t tls_t __attribute__((cleanup(tls_cleanup)))
 
-  TLS_OPT_PEER_NAME,
-  TLS_OPT_PEER_CERT,
+typedef struct tls tls_t;
 
-  TLS_OPT_SELF_NAME,
-  TLS_OPT_SELF_CERT,
-  TLS_OPT_SELF_ANON,
-} tls_opt_t;
+tls_t *
+tls_new(int fd, bool client);
+
+void
+tls_cleanup(tls_t **tls);
+
+tls_t *
+tls_incref(tls_t *tls);
+
+tls_t *
+tls_decref(tls_t *tls);
+
+bool
+tls_is_client(tls_t *tls);
+
+ssize_t
+tls_read(tls_t *tls, void *buf, size_t count);
+
+ssize_t
+tls_write(tls_t *tls, const void *buf, size_t count);
+
+int
+tls_getsockopt(tls_t *tls, int optname, void *optval, socklen_t *optlen);
+
+int
+tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen);
