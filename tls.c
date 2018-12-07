@@ -120,7 +120,7 @@ creds_reset(creds_t *creds)
 static void
 lock_cleanup(lock_t **lock)
 {
-  if (lock) {
+  if (lock && *lock) {
     pthread_rwlock_unlock(&(*lock)->lock);
     *lock = NULL;
   }
