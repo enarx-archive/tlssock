@@ -169,17 +169,17 @@ tls_new(int fd, bool client)
   if (getsockopt_int(fd, SOL_SOCKET, SO_PROTOCOL, &protocol) < 0)
     return NULL;
 
-  if (domain != AF_INET && domain != AF_INET6) {
+  if (!is_tls_domain(domain)) {
     errno = EINVAL; // FIXME
     return NULL;
   }
 
-  if (protocol != 0) {
+  if (!is_tls_type(type)) {
     errno = EINVAL; // FIXME
     return NULL;
   }
 
-  if (type != SOCK_STREAM && type != SOCK_DGRAM) {
+  if (!is_tls_inner_protocol(protocol)) {
     errno = EINVAL; // FIXME
     return NULL;
   }

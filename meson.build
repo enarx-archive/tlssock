@@ -39,7 +39,7 @@ threads = dependency('threads')
 
 install_headers('tlssock.h')
 libtlssock = shared_library('tlssock',
-  'core.h',
+  'core.c', 'core.h',
   'tls.c', 'tls.h',
   'idx.c', 'idx.h',
   'tlssock.c', 'tlssock.h',
