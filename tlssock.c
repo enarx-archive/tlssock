@@ -96,7 +96,7 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
   ret = NEXT(getsockopt)(sockfd, level, optname, optval, optlen);
 
   /* Translate the inner protocol to the outer one. */
-  if (ret >= 0 && level == SOL_SOCKET && optname == SO_PROTOCOL && *prot == 0) {
+  if (ret >= 0 && level == SOL_SOCKET && optname == SO_PROTOCOL && is_tls_inner_protocol(*prot)) {
     tls_auto_t *tls = NULL;
 
     if (*optlen != sizeof(*prot)) {
@@ -299,21 +299,8 @@ setsockopt(int sockfd, int level, int optname,
   const int *const protocol = optval;
   const bool client = *protocol == PROT_TLS_CLIENT;
 
-  /* The caller wants to transition to non-TLS. */
-  if (*protocol == 0) {
-    /* If deletion succeeded, then transition was successful. */
-    if (idx_del(sockfd))
-      return 0;
-
-    /* If the error is that there was no entry,
-     * then indicated that we are already non-TLS. */
-    if (errno == ENOENT)
-      errno = EALREADY; // FIXME
-
-    return -1;
-
   /* The caller wants to transition to TLS. */
-  } else {
+  if (is_tls_protocol(*protocol)) {
     /* Create the new TLS instance. */
     tls = tls_new(sockfd, client);
     if (!tls)
@@ -326,6 +313,19 @@ setsockopt(int sockfd, int level, int optname,
     /* Otherwise, set a context specific error. */
     if (already)
       errno = tls_is_client(already) == client ? EALREADY : EINVAL; // FIXME
+
+    return -1;
+
+  /* The caller wants to transition to non-TLS. */
+  } else {
+    /* If deletion succeeded, then transition was successful. */
+    if (idx_del(sockfd))
+      return 0;
+
+    /* If the error is that there was no entry,
+     * then indicated that we are already non-TLS. */
+    if (errno == ENOENT)
+      errno = EALREADY; // FIXME
 
     return -1;
   }

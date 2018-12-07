@@ -18,24 +18,32 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#pragma once
+#include "core.h"
+#include "tlssock.h"
 
-#define _GNU_SOURCE
-#include <stdbool.h>
-#include <dlfcn.h>
-
-#define __str(s) #s
-#define _str(s) __str(s)
-#define NEXT(name) ((typeof(name) *) dlsym(RTLD_NEXT, _str(name)))
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 bool
-is_tls_domain(int domain);
+is_tls_domain(int domain)
+{
+    return domain == AF_INET || domain == AF_INET6;
+}
 
 bool
-is_tls_type(int type);
+is_tls_type(int type)
+{
+    return type == SOCK_STREAM || type == SOCK_DGRAM;
+}
 
 bool
-is_tls_protocol(int protocol);
+is_tls_protocol(int protocol)
+{
+    return protocol == PROT_TLS_CLIENT || protocol == PROT_TLS_SERVER;
+}
 
 bool
-is_tls_inner_protocol(int protocol);
+is_tls_inner_protocol(int protocol)
+{
+    return protocol == 0 || protocol == IPPROTO_TCP || protocol == IPPROTO_UDP;
+}
