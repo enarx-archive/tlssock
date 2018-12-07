@@ -214,6 +214,42 @@ send(int sockfd, const void *buf, size_t len, int flags)
   return tls_write(tls, buf, len);
 }
 
+int
+accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+{
+  return accept4(sockfd, addr, addrlen, 0);
+}
+
+int
+accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
+{
+  int fd;
+
+  fd = NEXT(accept4)(sockfd, addr, addrlen, flags);
+
+  if (fd >= 0)
+  {
+    tls_auto_t *lis = NULL;
+
+    lis = idx_get(sockfd);
+    if (lis)
+    {
+      tls_auto_t *con = NULL;
+
+      // TODO: implement tls_dup() to copy options from the listening tls_t.
+      // NOTE: this requires that we add *_dup() functions to GnuTLS for all creds.
+      con = tls_new(fd, tls_is_client(lis));
+      if (!con || !idx_set(fd, con, NULL))
+      {
+        close(fd);
+        return -1;
+      }
+    }
+  }
+
+  return fd;
+}
+
 ssize_t
 sendto(int sockfd, const void *buf, size_t len, int flags,
        const struct sockaddr *dest_addr, socklen_t addrlen)
