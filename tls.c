@@ -105,19 +105,6 @@ gnutls2errno(int ret)
 }
 
 static void
-creds_reset(creds_t *creds)
-{
-  gnutls_certificate_free_credentials(creds->cert);
-  gnutls_anon_free_client_credentials(creds->clt.anon);
-  gnutls_psk_free_client_credentials(creds->clt.psk);
-  gnutls_srp_free_client_credentials(creds->clt.srp);
-  gnutls_anon_free_server_credentials(creds->srv.anon);
-  gnutls_psk_free_server_credentials(creds->srv.psk);
-  gnutls_srp_free_server_credentials(creds->srv.srp);
-  memset(creds, 0, sizeof(*creds));
-}
-
-static void
 lock_cleanup(lock_t **lock)
 {
   if (lock && *lock) {
@@ -237,8 +224,29 @@ tls_decref(tls_t *tls)
     if (tls->ref-- > 1)
       return tls;
 
-    gnutls_deinit(tls->session);
-    creds_reset(&tls->creds);
+    if (tls->session)
+      gnutls_deinit(tls->session);
+
+    if (tls->creds.cert)
+      gnutls_certificate_free_credentials(tls->creds.cert);
+
+    if (tls->creds.clt.anon)
+      gnutls_anon_free_client_credentials(tls->creds.clt.anon);
+
+    if (tls->creds.clt.psk)
+      gnutls_psk_free_client_credentials(tls->creds.clt.psk);
+
+    if (tls->creds.clt.srp)
+      gnutls_srp_free_client_credentials(tls->creds.clt.srp);
+
+    if (tls->creds.srv.anon)
+      gnutls_anon_free_server_credentials(tls->creds.srv.anon);
+
+    if (tls->creds.srv.psk)
+      gnutls_psk_free_server_credentials(tls->creds.srv.psk);
+
+    if (tls->creds.srv.srp)
+      gnutls_srp_free_server_credentials(tls->creds.srv.srp);
   }
 
   pthread_rwlock_destroy(&tls->lock.lock);
@@ -409,7 +417,8 @@ self_anon(tls_t *tls, const void *optval, socklen_t optlen)
       if (!tls->creds.clt.anon)
         ret = gnutls_anon_allocate_client_credentials(&tls->creds.clt.anon);
     } else {
-      gnutls_anon_free_client_credentials(tls->creds.clt.anon);
+      if (tls->creds.clt.anon)
+        gnutls_anon_free_client_credentials(tls->creds.clt.anon);
       tls->creds.clt.anon = NULL;
     }
 
@@ -418,7 +427,8 @@ self_anon(tls_t *tls, const void *optval, socklen_t optlen)
       if (!tls->creds.srv.anon)
         ret = gnutls_anon_allocate_server_credentials(&tls->creds.srv.anon);
     } else {
-      gnutls_anon_free_server_credentials(tls->creds.srv.anon);
+      if (tls->creds.srv.anon)
+        gnutls_anon_free_server_credentials(tls->creds.srv.anon);
       tls->creds.srv.anon = NULL;
     }
   }
