@@ -55,7 +55,7 @@ typedef union {
 } sockaddr_t;
 
 static void
-test(int type, const struct sockaddr *addr, socklen_t addrlen)
+test(int type, socklen_t addrlen, const struct sockaddr *addr)
 {
   int fd;
 
@@ -72,10 +72,21 @@ test(int type, const struct sockaddr *addr, socklen_t addrlen)
 int
 main(int argc, const char *argv[])
 {
-  sockaddr_t in6 = { .in6 = { AF_INET6, rport(), .sin6_addr = IN6ADDR_LOOPBACK_INIT } };
-  sockaddr_t in = { .in = { AF_INET, rport(), { htonl(INADDR_LOOPBACK) } } };
-  test(SOCK_STREAM, &in.addr, sizeof(in.in));
-  test(SOCK_DGRAM, &in.addr, sizeof(in.in));
-  test(SOCK_STREAM, &in6.addr, sizeof(in6.in6));
-  test(SOCK_DGRAM, &in6.addr, sizeof(in6.in6));
+  srand(getpid());
+
+  test(SOCK_STREAM, sizeof(struct sockaddr_in), &(sockaddr_t) {
+    .in = { AF_INET, rport(), { htonl(INADDR_LOOPBACK) } }
+  }.addr);
+
+  test(SOCK_STREAM, sizeof(struct sockaddr_in6), &(sockaddr_t) {
+    .in6 = { AF_INET6, rport(), .sin6_addr = IN6ADDR_LOOPBACK_INIT }
+  }.addr);
+
+  test(SOCK_DGRAM, sizeof(struct sockaddr_in), &(sockaddr_t) {
+    .in = { AF_INET, rport(), { htonl(INADDR_LOOPBACK) } }
+  }.addr);
+
+  test(SOCK_DGRAM, sizeof(struct sockaddr_in6), &(sockaddr_t) {
+    .in6 = { AF_INET6, rport(), .sin6_addr = IN6ADDR_LOOPBACK_INIT }
+  }.addr);
 }
