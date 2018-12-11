@@ -140,7 +140,7 @@ constructor(void)
 static void __attribute__((destructor))
 destructor(void)
 {
-  pthread_rwlock_rdlock(&idx.rwl);
+  pthread_rwlock_wrlock(&idx.rwl);
 
   for (size_t i = 0; i < idx.len; i++)
     tls_decref(idx.tls[i]);
