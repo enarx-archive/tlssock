@@ -29,8 +29,6 @@ add_project_arguments(
   language: 'c'
 )
 
-subdir('tests')
-
 cc = meson.get_compiler('c')
 dl = cc.find_library('dl', required: false)
 
