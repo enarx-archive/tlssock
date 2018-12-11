@@ -48,12 +48,10 @@ typedef struct {
 
   struct {
     gnutls_psk_client_credentials_t psk;
-    gnutls_srp_client_credentials_t srp;
   } clt;
 
   struct {
     gnutls_psk_server_credentials_t psk;
-    gnutls_srp_server_credentials_t srp;
   } srv;
 } creds_t;
 
@@ -231,14 +229,8 @@ tls_decref(tls_t *tls)
     if (tls->creds.clt.psk)
       gnutls_psk_free_client_credentials(tls->creds.clt.psk);
 
-    if (tls->creds.clt.srp)
-      gnutls_srp_free_client_credentials(tls->creds.clt.srp);
-
     if (tls->creds.srv.psk)
       gnutls_psk_free_server_credentials(tls->creds.srv.psk);
-
-    if (tls->creds.srv.srp)
-      gnutls_srp_free_server_credentials(tls->creds.srv.srp);
   }
 
   pthread_rwlock_destroy(&tls->lock.lock);
@@ -364,15 +356,9 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   if (tls_is_client(tls)) {
     if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.psk)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.clt.psk);
-
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.srp)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_SRP, tls->creds.clt.srp);
   } else {
     if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.psk)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.srv.psk);
-
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.srp)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_SRP, tls->creds.srv.srp);
   }
 
   if (ret == GNUTLS_E_SUCCESS)
