@@ -95,19 +95,32 @@ static inline int
 gnutls2errno(int ret)
 {
   switch (ret) {
-  case GNUTLS_E_SUCCESS:      return 0;
-  case GNUTLS_E_AGAIN:        errno = EAGAIN;   break;
-  case GNUTLS_E_INTERRUPTED:  errno = EINTR;    break;
-  case GNUTLS_E_LARGE_PACKET: errno = EMSGSIZE; break;
+  case GNUTLS_E_SUCCESS:
+    return 0;
+
+  case GNUTLS_E_AGAIN:
+    errno = EAGAIN;
+    return -1;
+
+  case GNUTLS_E_INTERRUPTED:
+    errno = EINTR;
+    return -1;
+
+  case GNUTLS_E_LARGE_PACKET:
+    errno = EMSGSIZE;
+    return -1;
+
+  case GNUTLS_E_INSUFFICIENT_CRED:
+    errno = EPERM; // FIXME
+    return -1;
+
   default:
     if (!gnutls_error_is_fatal(ret))
       return 0;
 
     errno = EIO; // FIXME
-    break;
+    return -1;
   }
-
-  return -1;
 }
 
 static void
