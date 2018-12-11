@@ -63,6 +63,8 @@ struct tls {
   creds_t creds;
   int flags;
   int fd;
+
+  const void *misc;
 };
 
 static int
@@ -275,8 +277,17 @@ int
 tls_getsockopt(tls_t *tls, int optname, void *optval, socklen_t *optlen)
 {
   lock_auto_t *lock = rdlock(tls);
-  errno = ENOSYS; // TODO
-  return -1;
+
+  switch (optname) {
+  case TLS_OPT_MISC:
+    *((const void **) optval) = tls->misc;
+    *optlen = sizeof(void *);
+    return 0;
+
+  default:
+    errno = ENOSYS; // TODO
+    return -1;
+  }
 }
 
 static ssize_t
@@ -384,6 +395,7 @@ tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
   case TLS_OPT_PEER_CERT: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_SELF_NAME: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_SELF_CERT: errno = ENOSYS; return -1; // TODO
+  case TLS_OPT_MISC: tls->misc = optval; return 0;
   default: errno = ENOPROTOOPT; return -1; // FIXME
   }
 }
