@@ -39,7 +39,7 @@ is_tls_type(int type)
 bool
 is_tls_protocol(int protocol)
 {
-    return protocol == PROT_TLS_CLIENT || protocol == PROT_TLS_SERVER;
+    return protocol == IPPROTO_TLS_CLT || protocol == IPPROTO_TLS_SRV;
 }
 
 bool

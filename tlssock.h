@@ -20,8 +20,8 @@
 
 #pragma once
 
-#define PROT_TLS_CLIENT 253
-#define PROT_TLS_SERVER 254
+#define IPPROTO_TLS_CLT 253
+#define IPPROTO_TLS_SRV 254
 
 typedef enum {
   TLS_OPT_HANDSHAKE = 0,

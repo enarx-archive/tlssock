@@ -41,8 +41,8 @@ static int
 inner_protocol(int protocol)
 {
   switch (protocol) {
-  case PROT_TLS_CLIENT: return 0;
-  case PROT_TLS_SERVER: return 0;
+  case IPPROTO_TLS_CLT: return 0;
+  case IPPROTO_TLS_SRV: return 0;
   default: return protocol;
   }
 }
@@ -82,10 +82,10 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
   int ret;
 
   /* Pass TLS level options into the tls_t layer. */
-  if (level == PROT_TLS_CLIENT || level == PROT_TLS_SERVER) {
+  if (level == IPPROTO_TLS_CLT || level == IPPROTO_TLS_SRV) {
     tls_auto_t *tls = NULL;
     tls = idx_get(sockfd);
-    if (!tls || tls_is_client(tls) != (level == PROT_TLS_CLIENT)) {
+    if (!tls || tls_is_client(tls) != (level == IPPROTO_TLS_CLT)) {
       errno = EINVAL; // FIXME
       return -1;
     }
@@ -106,7 +106,7 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 
     tls = idx_get(sockfd);
     if (tls)
-      *prot = tls_is_client(tls) ? PROT_TLS_CLIENT : PROT_TLS_SERVER;
+      *prot = tls_is_client(tls) ? IPPROTO_TLS_CLT : IPPROTO_TLS_SRV;
   }
 
   return ret;
@@ -276,9 +276,9 @@ setsockopt(int sockfd, int level, int optname,
   tls_auto_t *tls = NULL;
 
   /* Pass TLS level options into the tls_t layer. */
-  if (level == PROT_TLS_CLIENT || level == PROT_TLS_SERVER) {
+  if (level == IPPROTO_TLS_CLT || level == IPPROTO_TLS_SRV) {
     tls = idx_get(sockfd);
-    if (!tls || tls_is_client(tls) != (level == PROT_TLS_CLIENT)) {
+    if (!tls || tls_is_client(tls) != (level == IPPROTO_TLS_CLT)) {
       errno = EINVAL; // FIXME
       return -1;
     }
@@ -297,7 +297,7 @@ setsockopt(int sockfd, int level, int optname,
   }
 
   const int *const protocol = optval;
-  const bool client = *protocol == PROT_TLS_CLIENT;
+  const bool client = *protocol == IPPROTO_TLS_CLT;
 
   /* The caller wants to transition to TLS. */
   if (is_tls_protocol(*protocol)) {
@@ -342,9 +342,9 @@ socket(int domain, int type, int protocol)
     return fd;
 
   switch (protocol) {
-  case PROT_TLS_SERVER:
-  case PROT_TLS_CLIENT:
-    tls = tls_new(fd, protocol == PROT_TLS_CLIENT);
+  case IPPROTO_TLS_SRV:
+  case IPPROTO_TLS_CLT:
+    tls = tls_new(fd, protocol == IPPROTO_TLS_CLT);
     if (!tls || !idx_set(fd, tls, NULL)) {
       close(fd);
       return -1;
