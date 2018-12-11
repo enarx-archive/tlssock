@@ -369,7 +369,7 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   if (ret == GNUTLS_E_SUCCESS && tls->creds.cert)
     ret = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, tls->creds.cert);
 
-  if (tls->flags & GNUTLS_CLIENT) {
+  if (tls_is_client(tls)) {
     if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.anon)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_ANON, tls->creds.clt.anon);
 
@@ -412,7 +412,7 @@ self_anon(tls_t *tls, const void *optval, socklen_t optlen)
     return -1;
   }
 
-  if (tls->flags & GNUTLS_CLIENT) {
+  if (tls_is_client(tls)) {
     if (*enable) {
       if (!tls->creds.clt.anon)
         ret = gnutls_anon_allocate_client_credentials(&tls->creds.clt.anon);
