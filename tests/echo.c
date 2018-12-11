@@ -21,7 +21,8 @@
 #include "../tlssock.h"
 
 #include <arpa/inet.h>
-#include <inttypes.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <stdbool.h>
 #include <assert.h>
 #include <getopt.h>
@@ -46,30 +47,29 @@ static const struct option lopts[] = {
   {}
 };
 
-static bool
-parse_port(const char *string, in_port_t *number)
-{
-  uintmax_t port;
-
-  port = strtoumax(string, NULL, 10);
-  if (port == UINTMAX_MAX && errno == ERANGE)
-    return false;
-
-  if (port > UINT16_MAX)
-    return false;
-
-  *number = port;
-  return true;
-}
-
 static socklen_t
-socklen(sockaddr_t *addr)
+addrlen(sockaddr_t *addr)
 {
   switch (addr->addr.sa_family) {
   case AF_INET6: return sizeof(addr->in6);
   case AF_INET: return sizeof(addr->in);
   default: return 0;
   }
+}
+
+static int
+srv_cb(tls_opt_psk_srv_t *srv, void *misc, const char *username,
+       int (*callback)(tls_opt_psk_srv_t *srv,
+                       const uint8_t *key, size_t keylen))
+{
+  int *m = misc;
+
+  assert(*m == 17);
+
+  if (strcmp(username, psku) != 0)
+    return -1;
+
+  return callback(srv, (void *) pskk, strlen(pskk));
 }
 
 static int
@@ -95,6 +95,7 @@ main(int argc, char *argv[])
   sockaddr_t addr = {};
   int misc = 17;
   int fd = -1;
+  pid_t pid;
 
   for (int c; (c = getopt_long(argc, argv, sopts, lopts, NULL)) >= 0; ) {
     switch (c) {
@@ -132,58 +133,99 @@ main(int argc, char *argv[])
     }
   }
 
-  if (optind != argc - 2)
+  if (optind != argc - 1)
     goto usage;
 
+  srand(getpid());
   if (inet_pton(AF_INET, argv[optind], &addr.in.sin_addr) == 0) {
-    if (!parse_port(argv[optind+1], &addr.in.sin_port)) {
-      fprintf(stderr, "Invalid port: %s!\n", argv[optind+1]);
-      goto usage;
-    }
-
+    addr.in.sin_port = htons(rand() % (INT16_MAX - 1024) + 1024);
     addr.in.sin_family = AF_INET;
   } else if (inet_pton(AF_INET6, argv[optind], &addr.in6.sin6_addr) == 0) {
-    if (!parse_port(argv[optind+1], &addr.in6.sin6_port)) {
-      fprintf(stderr, "Invalid port: %s!\n", argv[optind+1]);
-      goto usage;
-    }
-
-    addr.in6.sin6_family = AF_INET;
+    addr.in6.sin6_port = htons(rand() % (INT16_MAX - 1024) + 1024);
+    addr.in6.sin6_family = AF_INET6;
   } else {
     fprintf(stderr, "Invalid IP address!\n");
     goto usage;
   }
 
-  fd = socket(addr.addr.sa_family, type, IPPROTO_TLS_CLT);
+  fd = socket(addr.addr.sa_family, type, IPPROTO_TLS_SRV);
   assert(fd >= 0);
 
-  assert(connect(fd, &addr.addr, socklen(&addr)) == 0);
+  assert(bind(fd, &addr.addr, addrlen(&addr)) == 0);
 
-  assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_MISC,
+  assert(listen(fd, 999) == 0);
+
+  pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    assert(close(fd) == 0);
+
+    fd = socket(addr.addr.sa_family, type, IPPROTO_TLS_CLT);
+    assert(fd >= 0);
+
+    assert(connect(fd, &addr.addr, addrlen(&addr)) == 0);
+
+    assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_MISC,
+                      &misc, sizeof(misc)) == 0);
+
+    if (psku && pskk) {
+      assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_PSK, &clt_cb, 0) == 0);
+    } else {
+      fprintf(stderr, "No authentication method specified!\n");
+      goto usage;
+    }
+
+    if (setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_HANDSHAKE, NULL, 0) != 0) {
+      fprintf(stderr, "client: %d: %m\n", errno);
+      abort();
+    }
+
+    assert(send(fd, "foo", 3, 0) == 3);
+
+    assert(recv(fd, buffer, sizeof(buffer), 0) == 3);
+
+    assert(memcmp(buffer, "foo", 3) == 0);
+
+    assert(close(fd) == 0);
+
+    free(psku);
+    return 0;
+  }
+
+  int tmp = accept(fd, NULL, NULL);
+  assert(tmp >= 0);
+  assert(close(fd) == 0);
+  fd = tmp;
+
+  assert(setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_MISC,
                     &misc, sizeof(misc)) == 0);
 
   if (psku && pskk) {
-    assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_PSK, &clt_cb, 0) == 0);
+    assert(setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_PSK, &srv_cb, 0) == 0);
   } else {
     fprintf(stderr, "No authentication method specified!\n");
     goto usage;
   }
 
-  assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_HANDSHAKE, NULL, 0) == 0);
+  if (setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_HANDSHAKE, NULL, 0) != 0) {
+    fprintf(stderr, "server: %d: %m\n", errno);
+    abort();
+  }
 
-  assert(send(fd, "foo", 3, 0) == 3);
-
-  assert(recv(fd, buffer, sizeof(buffer), 0) == 3);
-
-  assert(memcmp(buffer, "foo", 3) == 0);
+  ssize_t len = recv(fd, buffer, sizeof(buffer), 0);
+  assert(len >= 0);
+  assert(send(fd, buffer, len, 0) == len);
 
   assert(close(fd) == 0);
+  assert(waitpid(pid, &tmp, 0) == pid);
+  assert(WEXITSTATUS(tmp) == 0);
 
   free(psku);
   return 0;
 
 usage:
-  fprintf(stderr, "%s [-d] [-p USER:KEY] HOST PORT\n", argv[0]);
+  fprintf(stderr, "%s [-d] [-p USER:KEY] HOST\n", argv[0]);
   free(psku);
   return -1;
 }
+

@@ -110,13 +110,13 @@ gnutls2errno(int ret)
     errno = EMSGSIZE;
     return -1;
 
-  case GNUTLS_E_INSUFFICIENT_CRED:
-    errno = EPERM; // FIXME
+  case GNUTLS_E_INSUFFICIENT_CREDENTIALS:
+    errno = EACCES; // FIXME
     return -1;
 
   default:
     if (!gnutls_error_is_fatal(ret))
-      return 0;
+      return ret;
 
     errno = EIO; // FIXME
     return -1;
@@ -135,12 +135,16 @@ lock_cleanup(lock_t **lock)
 static lock_t *
 rdlock(tls_t *tls)
 {
+  int ret;
+
   if (!tls)
     return NULL;
 
-  errno = pthread_rwlock_rdlock(&tls->lock.lock);
-  if (errno != 0)
+  ret = pthread_rwlock_rdlock(&tls->lock.lock);
+  if (ret != 0) {
+    errno = ret;
     return NULL;
+  }
 
   return &tls->lock;
 }
@@ -148,12 +152,16 @@ rdlock(tls_t *tls)
 static lock_t *
 wrlock(tls_t *tls)
 {
+  int ret;
+
   if (!tls)
     return NULL;
 
-  errno = pthread_rwlock_wrlock(&tls->lock.lock);
-  if (errno != 0)
+  ret = pthread_rwlock_wrlock(&tls->lock.lock);
+  if (ret != 0) {
+    errno = ret;
     return NULL;
+  }
 
   return &tls->lock;
 }
@@ -165,6 +173,7 @@ tls_new(int fd, bool client)
   int protocol;
   int domain;
   int type;
+  int ret;
 
   if (getsockopt_int(fd, SOL_SOCKET, SO_DOMAIN, &domain) < 0)
     return NULL;
@@ -194,9 +203,10 @@ tls_new(int fd, bool client)
   if (!tls)
     return NULL;
 
-  errno = pthread_rwlock_init(&tls->lock.lock, NULL);
-  if (errno != 0) {
+  ret = pthread_rwlock_init(&tls->lock.lock, NULL);
+  if (ret != 0) {
     free(tls);
+    errno = ret;
     return NULL;
   }
 
@@ -272,26 +282,14 @@ ssize_t
 tls_read(tls_t *tls, void *buf, size_t count)
 {
   lock_auto_t *lock = rdlock(tls);
-  ssize_t ret = 0;
-
-  ret = gnutls_record_recv(tls->session, buf, count);
-  if (ret >= 0)
-    return ret;
-
-  return gnutls_error_is_fatal(ret) ? gnutls2errno(ret) : -1;
+  return gnutls2errno(gnutls_record_recv(tls->session, buf, count));
 }
 
 ssize_t
 tls_write(tls_t *tls, const void *buf, size_t count)
 {
   lock_auto_t *lock = rdlock(tls);
-  int ret;
-
-  ret = gnutls_record_send(tls->session, buf, count);
-  if (ret >= 0)
-    return ret;
-
-  return gnutls_error_is_fatal(ret) ? gnutls2errno(ret) : -1;
+  return gnutls2errno(gnutls_record_send(tls->session, buf, count));
 }
 
 int
@@ -382,8 +380,10 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
     gnutls_transport_set_vec_push_function(session, vec_push_func);
     gnutls_transport_set_pull_timeout_function(session, pull_timeout_func);
     gnutls_handshake_set_timeout(session, ms);
-    gnutls_set_default_priority(session);
   }
+
+  if (ret == GNUTLS_E_SUCCESS)
+    ret = gnutls_set_default_priority_append(session, "+PSK", NULL, 0);
 
   if (ret == GNUTLS_E_SUCCESS && tls->creds.cert)
     ret = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, tls->creds.cert);
@@ -399,13 +399,12 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   if (ret == GNUTLS_E_SUCCESS)
     ret = gnutls_handshake(session);
 
-  if (gnutls2errno(ret) != 0) {
+  if (ret == GNUTLS_E_SUCCESS)
+    tls->session = session;
+  else
     gnutls_free(session);
-    return -1;
-  }
 
-  tls->session = session;
-  return 0;
+  return gnutls2errno(ret);
 }
 
 struct tls_opt_psk_clt {
@@ -436,6 +435,7 @@ psk_clt_cb(tls_opt_psk_clt_t *clt, const char *username,
     return -1;
 
   memcpy(clt->key->data, key, keylen);
+  clt->key->size = keylen;
   return 0;
 }
 
@@ -450,6 +450,7 @@ psk_srv_cb(tls_opt_psk_srv_t *srv, const uint8_t *key, size_t keylen)
     return -1;
 
   memcpy(srv->key->data, key, keylen);
+  srv->key->size = keylen;
   return 0;
 }
 
@@ -459,6 +460,10 @@ psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
   tls_t *tls = gnutls_session_get_ptr(session);
   tls_opt_psk_clt_t clt = { key, username };
   int ret;
+
+  *username = NULL;
+  key->data = NULL;
+  key->size = 0;
 
   ret = tls->creds.clt.psk.func(&clt, tls->misc, psk_clt_cb);
   if (ret == 0)
@@ -472,6 +477,9 @@ psk_srv(gnutls_session_t session, const char *username, gnutls_datum_t *key)
   tls_t *tls = gnutls_session_get_ptr(session);
   tls_opt_psk_srv_t srv = { key };
   int ret;
+
+  key->data = NULL;
+  key->size = 0;
 
   ret = tls->creds.srv.psk.func(&srv, tls->misc, username, psk_srv_cb);
   if (ret == 0)
