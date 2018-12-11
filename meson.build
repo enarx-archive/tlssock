@@ -53,3 +53,11 @@ pkg.generate(
       version: meson.project_version(),
   install_dir: join_paths(get_option('libdir'), 'pkgconfig')
 )
+
+client = executable('client', 'tests/client.c', link_with: libtlssock)
+server = executable('server', 'tests/server.c', link_with: libtlssock)
+
+test('PSK IPv4 TCP', server, args: ['-p', 'foo:0123456789abcdef', '127.0.0.1', '54321'])
+test('PSK IPv6 TCP', server, args: ['-p', 'foo:0123456789abcdef', '::1', '54322'])
+#test('PSK IPv4 UDP', server, args: ['-d', '-p', 'foo:0123456789abcdef', '127.0.0.1', '54323'])
+#test('PSK IPv6 UDP', server, args: ['-d', '-p', 'foo:0123456789abcdef', '::1', '54324'])
