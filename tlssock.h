@@ -31,5 +31,4 @@ typedef enum {
 
   TLS_OPT_SELF_NAME,
   TLS_OPT_SELF_CERT,
-  TLS_OPT_SELF_ANON,
 } tls_opt_t;

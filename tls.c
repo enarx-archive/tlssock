@@ -47,13 +47,11 @@ typedef struct {
   gnutls_certificate_credentials_t cert;
 
   struct {
-    gnutls_anon_client_credentials_t anon;
     gnutls_psk_client_credentials_t psk;
     gnutls_srp_client_credentials_t srp;
   } clt;
 
   struct {
-    gnutls_anon_server_credentials_t anon;
     gnutls_psk_server_credentials_t psk;
     gnutls_srp_server_credentials_t srp;
   } srv;
@@ -230,17 +228,11 @@ tls_decref(tls_t *tls)
     if (tls->creds.cert)
       gnutls_certificate_free_credentials(tls->creds.cert);
 
-    if (tls->creds.clt.anon)
-      gnutls_anon_free_client_credentials(tls->creds.clt.anon);
-
     if (tls->creds.clt.psk)
       gnutls_psk_free_client_credentials(tls->creds.clt.psk);
 
     if (tls->creds.clt.srp)
       gnutls_srp_free_client_credentials(tls->creds.clt.srp);
-
-    if (tls->creds.srv.anon)
-      gnutls_anon_free_server_credentials(tls->creds.srv.anon);
 
     if (tls->creds.srv.psk)
       gnutls_psk_free_server_credentials(tls->creds.srv.psk);
@@ -370,18 +362,12 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
     ret = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, tls->creds.cert);
 
   if (tls_is_client(tls)) {
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.anon)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_ANON, tls->creds.clt.anon);
-
     if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.psk)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.clt.psk);
 
     if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.srp)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_SRP, tls->creds.clt.srp);
   } else {
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.anon)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_ANON, tls->creds.srv.anon);
-
     if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.psk)
       ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.srv.psk);
 
@@ -401,41 +387,6 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   return 0;
 }
 
-static int
-self_anon(tls_t *tls, const void *optval, socklen_t optlen)
-{
-  const unsigned int *const enable = optval;
-  int ret = GNUTLS_E_SUCCESS;
-
-  if (!optval || optlen != sizeof(*enable)) {
-    errno = EINVAL; // FIXME
-    return -1;
-  }
-
-  if (tls_is_client(tls)) {
-    if (*enable) {
-      if (!tls->creds.clt.anon)
-        ret = gnutls_anon_allocate_client_credentials(&tls->creds.clt.anon);
-    } else {
-      if (tls->creds.clt.anon)
-        gnutls_anon_free_client_credentials(tls->creds.clt.anon);
-      tls->creds.clt.anon = NULL;
-    }
-
-  } else {
-    if (*enable) {
-      if (!tls->creds.srv.anon)
-        ret = gnutls_anon_allocate_server_credentials(&tls->creds.srv.anon);
-    } else {
-      if (tls->creds.srv.anon)
-        gnutls_anon_free_server_credentials(tls->creds.srv.anon);
-      tls->creds.srv.anon = NULL;
-    }
-  }
-
-  return gnutls2errno(ret);
-}
-
 int
 tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
 {
@@ -447,7 +398,6 @@ tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
   case TLS_OPT_PEER_CERT: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_SELF_NAME: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_SELF_CERT: errno = ENOSYS; return -1; // TODO
-  case TLS_OPT_SELF_ANON: return self_anon(tls, optval, optlen);
   default: errno = ENOPROTOOPT; return -1; // FIXME
   }
 }
