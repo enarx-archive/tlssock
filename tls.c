@@ -46,13 +46,21 @@ typedef struct {
 typedef struct {
   gnutls_certificate_credentials_t cert;
 
-  struct {
-    gnutls_psk_client_credentials_t psk;
-  } clt;
+  union {
+    struct {
+      struct {
+        gnutls_psk_client_credentials_t cred;
+        tls_opt_psk_clt_f func;
+      } psk;
+    } clt;
 
-  struct {
-    gnutls_psk_server_credentials_t psk;
-  } srv;
+    struct {
+      struct {
+        gnutls_psk_server_credentials_t cred;
+        tls_opt_psk_srv_f func;
+      } psk;
+    } srv;
+  };
 } creds_t;
 
 struct tls {
@@ -179,9 +187,7 @@ tls_new(int fd, bool client)
     return NULL;
   }
 
-  if (type == SOCK_DGRAM)
-    tls->flags |= GNUTLS_DATAGRAM;
-
+  tls->flags |= type == SOCK_DGRAM ? GNUTLS_DATAGRAM : 0;
   tls->flags |= client ? GNUTLS_CLIENT : GNUTLS_SERVER;
   tls->ref = 1;
   tls->fd = fd;
@@ -228,11 +234,13 @@ tls_decref(tls_t *tls)
     if (tls->creds.cert)
       gnutls_certificate_free_credentials(tls->creds.cert);
 
-    if (tls->creds.clt.psk)
-      gnutls_psk_free_client_credentials(tls->creds.clt.psk);
-
-    if (tls->creds.srv.psk)
-      gnutls_psk_free_server_credentials(tls->creds.srv.psk);
+    if (tls_is_client(tls)) {
+      if (tls->creds.clt.psk.cred)
+        gnutls_psk_free_client_credentials(tls->creds.clt.psk.cred);
+    } else {
+      if (tls->creds.srv.psk.cred)
+        gnutls_psk_free_server_credentials(tls->creds.srv.psk.cred);
+    }
   }
 
   pthread_rwlock_destroy(&tls->lock.lock);
@@ -334,7 +342,8 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   unsigned int ms = GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT;
   const unsigned int *const milliseconds = optval;
   gnutls_session_t session = NULL;
-  int ret;
+  int ret = 0;
+  int nb = 0;
 
   if (milliseconds) {
     if (optlen != sizeof(*milliseconds)) {
@@ -348,10 +357,12 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   ret = fcntl(tls->fd, F_GETFL);
   if (ret < 0)
     return ret;
+  if (ret & O_NONBLOCK)
+    nb = GNUTLS_NONBLOCK;
 
-  ret = gnutls_init(&session,
-                    tls->flags | (ret & O_NONBLOCK) ? GNUTLS_NONBLOCK : 0);
+  ret = gnutls_init(&session, tls->flags | nb);
   if (ret == GNUTLS_E_SUCCESS) {
+    gnutls_session_set_ptr(session, tls);
     gnutls_transport_set_ptr(session, &tls->fd);
     gnutls_transport_set_pull_function(session, pull_func);
     gnutls_transport_set_push_function(session, push_func);
@@ -365,11 +376,11 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
     ret = gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, tls->creds.cert);
 
   if (tls_is_client(tls)) {
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.psk)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.clt.psk);
+    if (ret == GNUTLS_E_SUCCESS && tls->creds.clt.psk.cred)
+      ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.clt.psk.cred);
   } else {
-    if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.psk)
-      ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.srv.psk);
+    if (ret == GNUTLS_E_SUCCESS && tls->creds.srv.psk.cred)
+      ret = gnutls_credentials_set(session, GNUTLS_CRD_PSK, tls->creds.srv.psk.cred);
   }
 
   if (ret == GNUTLS_E_SUCCESS)
@@ -384,6 +395,117 @@ handshake(tls_t *tls, const void *optval, socklen_t optlen)
   return 0;
 }
 
+struct tls_opt_psk_clt {
+  gnutls_datum_t *key;
+  char **username;
+};
+
+struct tls_opt_psk_srv {
+  gnutls_datum_t *key;
+};
+
+static int
+psk_clt_cb(tls_opt_psk_clt_t *clt, const char *username,
+           const uint8_t *key, size_t keylen)
+{
+  if (*clt->username)
+    gnutls_free(*clt->username);
+
+  if (clt->key->data)
+    gnutls_free(clt->key->data);
+
+  *clt->username = gnutls_strdup(username);
+  if (!*clt->username)
+    return -1;
+
+  clt->key->data = gnutls_malloc(keylen);
+  if (!clt->key->data)
+    return -1;
+
+  memcpy(clt->key->data, key, keylen);
+  return 0;
+}
+
+static int
+psk_srv_cb(tls_opt_psk_srv_t *srv, const uint8_t *key, size_t keylen)
+{
+  if (srv->key->data)
+    gnutls_free(srv->key->data);
+
+  srv->key->data = gnutls_malloc(keylen);
+  if (!srv->key->data)
+    return -1;
+
+  memcpy(srv->key->data, key, keylen);
+  return 0;
+}
+
+static int
+psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
+{
+  tls_t *tls = gnutls_session_get_ptr(session);
+  tls_opt_psk_clt_t clt = { key, username };
+  int ret;
+
+  ret = tls->creds.clt.psk.func(&clt, tls->misc, psk_clt_cb);
+  if (ret == 0)
+    ret = (*username && key->data) ? 0 : -1;
+  return ret;
+}
+
+static int
+psk_srv(gnutls_session_t session, const char *username, gnutls_datum_t *key)
+{
+  tls_t *tls = gnutls_session_get_ptr(session);
+  tls_opt_psk_srv_t srv = { key };
+  int ret;
+
+  ret = tls->creds.srv.psk.func(&srv, tls->misc, username, psk_srv_cb);
+  if (ret == 0)
+    ret = key->data ? 0 : -1;
+  return ret;
+}
+
+static int
+psk(tls_t *tls, const void *optval, socklen_t optlen)
+{
+  int ret = GNUTLS_E_SUCCESS;
+
+  if (tls_is_client(tls)) {
+    tls->creds.clt.psk.func = optval;
+
+    if (optval) {
+      if (!tls->creds.clt.psk.cred)
+        ret = gnutls_psk_allocate_client_credentials(&tls->creds.clt.psk.cred);
+
+      if (ret == GNUTLS_E_SUCCESS)
+        gnutls_psk_set_client_credentials_function(tls->creds.clt.psk.cred, psk_clt);
+    } else {
+      if (tls->creds.clt.psk.cred)
+        gnutls_psk_free_client_credentials(tls->creds.clt.psk.cred);
+
+      memset(&tls->creds.clt.psk, 0, sizeof(tls->creds.clt.psk));
+    }
+  } else {
+    tls->creds.srv.psk.func = optval;
+
+    if (optval) {
+      if (!tls->creds.srv.psk.cred)
+        ret = gnutls_psk_allocate_server_credentials(&tls->creds.srv.psk.cred);
+
+      if (ret == GNUTLS_E_SUCCESS)
+        gnutls_psk_set_server_credentials_function(tls->creds.srv.psk.cred, psk_srv);
+    } else {
+      if (tls->creds.srv.psk.cred)
+        gnutls_psk_free_server_credentials(tls->creds.srv.psk.cred);
+
+      memset(&tls->creds.srv.psk, 0, sizeof(tls->creds.srv.psk));
+    }
+  }
+
+  return gnutls2errno(ret);
+}
+
 int
 tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
 {
@@ -396,6 +518,7 @@ tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
   case TLS_OPT_SELF_NAME: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_SELF_CERT: errno = ENOSYS; return -1; // TODO
   case TLS_OPT_MISC: tls->misc = optval; return 0;
+  case TLS_OPT_PSK: return psk(tls, optval, optlen);
   default: errno = ENOPROTOOPT; return -1; // FIXME
   }
 }

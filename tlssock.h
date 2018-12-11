@@ -20,6 +20,9 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <stddef.h>
+
 #define IPPROTO_TLS_CLT 253
 #define IPPROTO_TLS_SRV 254
 
@@ -32,5 +35,21 @@ typedef enum {
   TLS_OPT_SELF_NAME,
   TLS_OPT_SELF_CERT,
 
+  TLS_OPT_PSK,
+
   TLS_OPT_MISC,
 } tls_opt_t;
+
+typedef struct tls_opt_psk_clt tls_opt_psk_clt_t;
+typedef int
+(*tls_opt_psk_clt_f)(tls_opt_psk_clt_t *clt, const void *misc,
+                     int (*callback)(tls_opt_psk_clt_t *clt,
+                                     const char *username,
+                                     const uint8_t *key, size_t keylen));
+
+typedef struct tls_opt_psk_srv tls_opt_psk_srv_t;
+typedef int
+(*tls_opt_psk_srv_f)(tls_opt_psk_srv_t *srv, const void *misc,
+                     const char *username,
+                     int (callback)(tls_opt_psk_srv_t *srv,
+                                    const uint8_t *key, size_t keylen));
