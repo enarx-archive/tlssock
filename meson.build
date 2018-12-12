@@ -35,12 +35,12 @@ dl = cc.find_library('dl', required: false)
 gnutls = dependency('gnutls', version: '>=3.0.0')
 threads = dependency('threads')
 
-install_headers('tlssock.h')
+install_headers('src/tlssock.h')
 libtlssock = shared_library('tlssock',
-  'core.c', 'core.h',
-  'tls.c', 'tls.h',
-  'idx.c', 'idx.h',
-  'tlssock.c', 'tlssock.h',
+  'src/core.c', 'src/core.h',
+  'src/tls.c', 'src/tls.h',
+  'src/idx.c', 'src/idx.h',
+  'src/tlssock.c', 'src/tlssock.h',
   dependencies: [gnutls, threads, dl],
   install: true,
 )
