@@ -75,22 +75,6 @@ struct tls {
   const void *misc;
 };
 
-static int
-getsockopt_int(int fd, int level, int optname, int *optval)
-{
-  socklen_t len = sizeof(*optval);
-  int ret;
-
-  ret = NEXT(getsockopt)(fd, level, optname, optval, &len);
-
-  if (ret == 0 && len != sizeof(*optval)) {
-    errno = EINVAL; // FIXME
-    return -1;
-  }
-
-  return ret;
-}
-
 static inline int
 gnutls2errno(int ret)
 {

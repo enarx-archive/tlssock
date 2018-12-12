@@ -23,6 +23,7 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <errno.h>
 
 bool
 is_tls_domain(int domain)
@@ -46,4 +47,20 @@ bool
 is_tls_inner_protocol(int protocol)
 {
     return protocol == 0 || protocol == IPPROTO_TCP || protocol == IPPROTO_UDP;
+}
+
+int
+getsockopt_int(int fd, int level, int optname, int *optval)
+{
+  socklen_t len = sizeof(*optval);
+  int ret;
+
+  ret = NEXT(getsockopt)(fd, level, optname, optval, &len);
+
+  if (ret == 0 && len != sizeof(*optval)) {
+    errno = EINVAL; // FIXME
+    return -1;
+  }
+
+  return ret;
 }

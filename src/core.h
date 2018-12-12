@@ -39,3 +39,6 @@ is_tls_protocol(int protocol);
 
 bool
 is_tls_inner_protocol(int protocol);
+
+int
+getsockopt_int(int fd, int level, int optname, int *optval);
