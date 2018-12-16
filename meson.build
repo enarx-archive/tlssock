@@ -34,7 +34,7 @@ cc = meson.get_compiler('c')
 dl = cc.find_library('dl', required: false)
 
 openssl = dependency('openssl', version: '>=1.1.0', required: false)
-gnutls = dependency('gnutls', version: '>=3.0.0', required: false)
+gnutls = dependency('gnutls', version: '>=3.6.0', required: false)
 threads = dependency('threads')
 
 variants = [ openssl, gnutls ]
