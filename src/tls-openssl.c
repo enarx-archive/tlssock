@@ -405,6 +405,19 @@ tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
   }
 }
 
+static long
+bio_ctrl(BIO *bio, int cmd, long iarg, void *parg)
+{
+  switch (cmd) {
+  case BIO_CTRL_FLUSH:
+    fsync((int) (intptr_t) BIO_get_data(bio));
+    return 1;
+
+  default:
+    return 0;
+  }
+}
+
 static int
 bio_read_ex(BIO *bio, char *buf, size_t cnt, size_t *bytes)
 {
@@ -441,6 +454,9 @@ constructor(void)
 
   stream = BIO_meth_new(sid, "tlssock-stream");
   dgram = BIO_meth_new(did, "tlssock-dgram");
+
+  BIO_meth_set_ctrl(stream, bio_ctrl);
+  BIO_meth_set_ctrl(dgram, bio_ctrl);
 
   BIO_meth_set_read_ex(stream, bio_read_ex);
   BIO_meth_set_read_ex(dgram, bio_read_ex);
