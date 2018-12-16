@@ -1,0 +1,37 @@
+#!/bin/bash -ex
+
+case "$DISTRO" in
+  osx:*)
+    brew update
+    for pkg in gnutls openssl meson; do
+        brew ls --versions $pkg || brew install $pkg
+        brew outdated $pkg || brew upgrade $pkg || true
+    done
+    ;;
+
+  debian:*|ubuntu:*)
+    apt-get clean
+
+    while ! apt-get update; do
+        sleep 2
+    done
+
+    while ! apt-get -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confnew" \
+        dist-upgrade; do
+        sleep 2
+    done
+
+    while ! apt-get -y install $CC meson git \
+        build-essential pkg-config libssl-dev libgnutls28-dev; do
+        sleep 2
+    done
+    ;;
+
+  fedora:*)
+    dnf -y clean all
+    dnf -y --setopt=deltarpm=0 update
+    dnf -y install $CC meson git pkgconfig openssl-devel gnutls-devel
+    ;;
+esac

@@ -1,0 +1,34 @@
+language: c
+
+#matrix:
+#  include:
+#    - osx_image: xcode9.4
+#      compiler: clang
+#      os: osx
+#      env:
+#        - DISTRO=osx:xcode9.4
+#        - PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig:/usr/local/opt/zlib/lib/pkgconfig
+#    - osx_image: xcode10.1
+#      compiler: clang
+#      os: osx
+#      env:
+#        - DISTRO=osx:xcode10.1
+#        - PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig:/usr/local/opt/zlib/lib/pkgconfig
+
+compiler:
+#  - clang
+  - gcc
+
+os: linux
+sudo: required
+services: docker
+env:
+  matrix:
+    - DISTRO=fedora:rawhide
+#    - DISTRO=debian:unstable
+#    - DISTRO=ubuntu:devel
+
+before_install: ./.travis.docker before_install
+install: ./.travis.docker install
+script: ./.travis.docker script
+after_script: ./.travis.docker after_script
