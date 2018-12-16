@@ -25,6 +25,7 @@
 #include <gnutls/gnutls.h>
 #include <pthread.h>
 
+#include <sys/uio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
