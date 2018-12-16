@@ -25,11 +25,8 @@
 #include <unistd.h>
 
 #define IPPROTO_TLS 253
-
-typedef enum {
-  TLS_OPT_CLT_HANDSHAKE = 0,
-  TLS_OPT_SRV_HANDSHAKE,
-} tls_opt_t;
+#define TLS_CLT_HANDSHAKE 1
+#define TLS_SRV_HANDSHAKE 2
 
 typedef struct {
   void *misc;

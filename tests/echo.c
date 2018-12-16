@@ -180,7 +180,7 @@ main(int argc, char *argv[])
       goto usage;
     }
 
-    if (setsockopt(fd, IPPROTO_TLS, TLS_OPT_CLT_HANDSHAKE, &clt, sizeof(clt)) != 0) {
+    if (setsockopt(fd, IPPROTO_TLS, TLS_CLT_HANDSHAKE, &clt, sizeof(clt)) != 0) {
       fprintf(stderr, "client: %d: %m\n", errno);
       abort();
     }
@@ -211,7 +211,7 @@ main(int argc, char *argv[])
     goto usage;
   }
 
-  if (setsockopt(fd, IPPROTO_TLS, TLS_OPT_SRV_HANDSHAKE, &srv, sizeof(srv)) != 0) {
+  if (setsockopt(fd, IPPROTO_TLS, TLS_SRV_HANDSHAKE, &srv, sizeof(srv)) != 0) {
     fprintf(stderr, "server: %d: %m\n", errno);
     abort();
   }

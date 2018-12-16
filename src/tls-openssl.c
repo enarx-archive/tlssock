@@ -312,10 +312,9 @@ error:
 }
 
 static int
-handshake(tls_t *tls, int fd, tls_opt_t optname,
-          const void *optval, socklen_t optlen)
+handshake(tls_t *tls, int fd, int optname, const void *optval, socklen_t optlen)
 {
-  bool client = optname == TLS_OPT_CLT_HANDSHAKE;
+  bool client = optname == TLS_CLT_HANDSHAKE;
   int ret;
 
   union {
@@ -366,8 +365,8 @@ tls_setsockopt(tls_t *tls, int fd, int optname,
   lock_auto_t *lock = wrlock(tls);
 
   switch (optname) {
-  case TLS_OPT_CLT_HANDSHAKE:
-  case TLS_OPT_SRV_HANDSHAKE:
+  case TLS_CLT_HANDSHAKE:
+  case TLS_SRV_HANDSHAKE:
     return handshake(tls, fd, optname, optval, optlen);
 
   default:

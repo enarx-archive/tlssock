@@ -440,9 +440,9 @@ tls_setsockopt(tls_t *tls, int fd, int optname,
   lock_auto_t *lock = wrlock(tls);
 
   switch (optname) {
-  case TLS_OPT_CLT_HANDSHAKE:
-  case TLS_OPT_SRV_HANDSHAKE:
-    return handshake(tls, fd, optname == TLS_OPT_CLT_HANDSHAKE, optval, optlen);
+  case TLS_CLT_HANDSHAKE:
+  case TLS_SRV_HANDSHAKE:
+    return handshake(tls, fd, optname == TLS_CLT_HANDSHAKE, optval, optlen);
 
   default:
     errno = ENOPROTOOPT; // FIXME
