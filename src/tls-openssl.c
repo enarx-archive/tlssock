@@ -50,14 +50,7 @@ struct tls {
   lock_t lock;
   size_t ref;
 
-  const void *misc;
   SSL *ssl;
-  int fd;
-
-  union {
-    tls_opt_psk_srv_f srv;
-    tls_opt_psk_clt_f clt;
-  } psk;
 };
 
 static void
@@ -103,82 +96,48 @@ wrlock(tls_t *tls)
   return &tls->lock;
 }
 
-tls_t *
-tls_new(int fd, bool client)
+static int
+o2e(tls_t *tls, int ret)
 {
-  SSL_CTX *ctx = NULL;
+  switch (SSL_get_error(tls->ssl, ret)) {
+  case SSL_ERROR_WANT_CONNECT:
+  case SSL_ERROR_ZERO_RETURN:
+  case SSL_ERROR_WANT_ACCEPT:
+    errno = ENOTCONN; // FIXME
+    return -1;
+
+  case SSL_ERROR_WANT_WRITE:
+  case SSL_ERROR_WANT_READ:
+    errno = EAGAIN; // FIXME
+    return -1;
+
+  case SSL_ERROR_SYSCALL:
+    return -1; // errno already set (I think...)
+
+  default:
+    errno = EIO; // FIXME
+    return -1;
+  }
+}
+
+tls_t *
+tls_new(void)
+{
   tls_t *tls = NULL;
-  BIO *bio = NULL;
-  int protocol;
-  int domain;
-  int type;
   int ret;
-
-  if (getsockopt_int(fd, SOL_SOCKET, SO_DOMAIN, &domain) < 0)
-    return NULL;
-
-  if (getsockopt_int(fd, SOL_SOCKET, SO_TYPE, &type) < 0)
-    return NULL;
-
-  if (getsockopt_int(fd, SOL_SOCKET, SO_PROTOCOL, &protocol) < 0)
-    return NULL;
-
-  if (!is_tls_domain(domain)) {
-    errno = EINVAL; // FIXME
-    return NULL;
-  }
-
-  if (!is_tls_type(type)) {
-    errno = EINVAL; // FIXME
-    return NULL;
-  }
-
-  if (!is_tls_inner_protocol(protocol)) {
-    errno = EINVAL; // FIXME
-    return NULL;
-  }
 
   tls = calloc(1, sizeof(*tls));
   if (!tls)
     return NULL;
 
-  ctx = SSL_CTX_new(type == SOCK_STREAM ? TLS_method() : DTLS_method());
-  bio = BIO_new(type == SOCK_STREAM ? stream : dgram);
-  if (!ctx || !bio) {
-    SSL_CTX_free(ctx);
-    BIO_free(bio);
-    free(tls);
-    errno = ENOMEM;
-    return NULL;
-  }
-
-  tls->ssl = SSL_new(ctx);
-  BIO_set_data(bio, tls);
-  SSL_CTX_free(ctx);
-  if (!tls->ssl) {
-    BIO_free(bio);
-    free(tls);
-    errno = ENOMEM;
-    return NULL;
-  } else {
-    SSL_set_bio(tls->ssl, bio, bio);
-  }
-
   ret = pthread_rwlock_init(&tls->lock.lock, NULL);
-  if (ret != 0 || SSL_set_ex_data(tls->ssl, 0, tls) != 1) {
-    SSL_free(tls->ssl);
+  if (ret != 0) {
     free(tls);
     errno = ret;
     return NULL;
   }
 
-  if (client)
-    SSL_set_connect_state(tls->ssl);
-  else
-    SSL_set_accept_state(tls->ssl);
-
   tls->ref = 1;
-  tls->fd = fd;
   return tls;
 }
 
@@ -225,39 +184,8 @@ tls_decref(tls_t *tls)
   return NULL;
 }
 
-bool
-tls_is_client(tls_t *tls)
-{
-  lock_auto_t *lock = rdlock(tls);
-  return !SSL_is_server(tls->ssl);
-}
-
-static int
-o2e(tls_t *tls, int ret)
-{
-  switch (SSL_get_error(tls->ssl, ret)) {
-  case SSL_ERROR_WANT_CONNECT:
-  case SSL_ERROR_ZERO_RETURN:
-  case SSL_ERROR_WANT_ACCEPT:
-    errno = ENOTCONN; // FIXME
-    return -1;
-
-  case SSL_ERROR_WANT_WRITE:
-  case SSL_ERROR_WANT_READ:
-    errno = EAGAIN; // FIXME
-    return -1;
-
-  case SSL_ERROR_SYSCALL:
-    return -1; // errno already set (I think...)
-
-  default:
-    errno = EIO; // FIXME
-    return -1;
-  }
-}
-
 ssize_t
-tls_read(tls_t *tls, void *buf, size_t count)
+tls_read(tls_t *tls, int fd, void *buf, size_t count)
 {
   lock_auto_t *lock = rdlock(tls);
   size_t bytes = 0;
@@ -271,7 +199,7 @@ tls_read(tls_t *tls, void *buf, size_t count)
 }
 
 ssize_t
-tls_write(tls_t *tls, const void *buf, size_t count)
+tls_write(tls_t *tls, int fd, const void *buf, size_t count)
 {
   lock_auto_t *lock = rdlock(tls);
   size_t bytes = 0;
@@ -285,123 +213,166 @@ tls_write(tls_t *tls, const void *buf, size_t count)
 }
 
 int
-tls_getsockopt(tls_t *tls, int optname, void *optval, socklen_t *optlen)
+tls_getsockopt(tls_t *tls, int fd, int optname, void *optval, socklen_t *optlen)
 {
-  lock_auto_t *lock = rdlock(tls);
-
-  switch (optname) {
-  case TLS_OPT_MISC:
-    *((const void **) optval) = tls->misc;
-    *optlen = sizeof(void *);
-    return 0;
-
-  default:
-    errno = ENOSYS; // TODO
-    return -1;
-  }
-}
-
-static int
-handshake(tls_t *tls, const void *optval, socklen_t optlen)
-{
-  int ret;
-
-  ret = SSL_do_handshake(tls->ssl);
-  if (ret == 1)
-    return 0;
-
-  return o2e(tls, ret);
-}
-
-struct tls_opt_psk_clt {
-  unsigned int imax;
-  unsigned int pmax;
-  unsigned int len;
-  uint8_t *psk;
-  char *id;
-};
-
-struct tls_opt_psk_srv {
-  const unsigned int max;
-  unsigned char *psk;
-  unsigned int len;
-};
-
-static int
-psk_clt_cb(tls_opt_psk_clt_t *clt, const char *username,
-           const uint8_t *key, size_t keylen)
-{
-  if (strlen(username) >= clt->imax)
-    return -1;
-
-  if (keylen > clt->pmax)
-    return -1;
-
-  memcpy(clt->psk, key, keylen);
-  strcpy(clt->id, username);
-  clt->len = keylen;
-  return 0;
-}
-
-static int
-psk_srv_cb(tls_opt_psk_srv_t *srv, const uint8_t *key, size_t keylen)
-{
-  if (keylen > srv->max)
-    return -1;
-
-  memcpy(srv->psk, key, keylen);
-  srv->len = keylen;
-  return 0;
+  errno = ENOSYS; // TODO
+  return -1;
 }
 
 static unsigned int
 psk_clt(SSL *ssl, const char *hint, char *id, unsigned int imax,
         unsigned char *psk, unsigned int pmax)
 {
-  tls_opt_psk_clt_t clt = { .pmax = pmax, .imax = imax, .psk = psk, .id = id };
-  tls_t *tls = SSL_get_ex_data(ssl, 0);
-  tls->psk.clt(&clt, tls->misc, psk_clt_cb);
-  return clt.len;
+  const tls_clt_t *clt = SSL_get_ex_data(ssl, 0);
+  unsigned int ret = 0;
+  uint8_t *k = NULL;
+  char *u = NULL;
+  ssize_t l = 0;
+
+  l = clt->psk(clt->misc, hint, &u, &k);
+  if (l < 0)
+    return 0;
+
+  if (strlen(id) < imax && l <= pmax) {
+    strcpy(id, u);
+    memcpy(psk, k, l);
+    ret = l;
+  }
+
+  explicit_bzero(u, strlen(u));
+  explicit_bzero(k, l);
+  free(u);
+  free(k);
+  return ret;
 }
 
 static unsigned int
 psk_srv(SSL *ssl, const char *identity, unsigned char *psk,
         unsigned int max_psk_len)
 {
-  tls_opt_psk_srv_t srv = { max_psk_len, psk, 0 };
-  tls_t *tls = BIO_get_data(SSL_get_rbio(ssl));
-  tls->psk.srv(&srv, tls->misc, identity, psk_srv_cb);
-  return srv.len;
+  const tls_srv_t *srv = SSL_get_ex_data(ssl, 0);
+  unsigned int ret = 0;
+  uint8_t *k = NULL;
+  ssize_t l = 0;
+
+  l = srv->psk(srv->misc, identity, &k);
+  if (l < 0)
+    return 0;
+
+  if (l <= max_psk_len) {
+    memcpy(psk, k, l);
+    ret = l;
+  }
+
+  explicit_bzero(k, l);
+  free(k);
+  return ret;
+}
+
+static SSL *
+ssl_new(int fd, bool client)
+{
+  SSL_CTX *ctx = NULL;
+  BIO *bio = NULL;
+  SSL *ssl = NULL;
+  int type = 0;
+
+  if (getsockopt_int(fd, SOL_SOCKET, SO_TYPE, &type) < 0)
+    return NULL;
+
+  ctx = SSL_CTX_new(type == SOCK_STREAM ? TLS_method() : DTLS_method());
+  if (!ctx)
+    goto error;
+
+  bio = BIO_new(type == SOCK_STREAM ? stream : dgram);
+  if (!bio)
+    goto error;
+
+  ssl = SSL_new(ctx);
+  if (!ssl)
+    goto error;
+
+  if (client)
+    SSL_set_connect_state(ssl);
+  else
+    SSL_set_accept_state(ssl);
+
+  BIO_set_data(bio, (void *) (intptr_t) fd);
+  SSL_set_bio(ssl, bio, bio);
+  SSL_CTX_free(ctx);
+  return ssl;
+
+error:
+  SSL_CTX_free(ctx);
+  BIO_free(bio);
+  SSL_free(ssl);
+
+  errno = ENOMEM;
+  return NULL;
 }
 
 static int
-psk(tls_t *tls, const void *optval, socklen_t optlen)
+handshake(tls_t *tls, int fd, tls_opt_t optname,
+          const void *optval, socklen_t optlen)
 {
-  if (tls_is_client(tls)) {
-    SSL_set_psk_client_callback(tls->ssl, optval ? psk_clt : NULL);
-    tls->psk.clt = optval;
-  } else {
-    SSL_set_psk_server_callback(tls->ssl, optval ? psk_srv : NULL);
-    tls->psk.srv = optval;
+  bool client = optname == TLS_OPT_CLT_HANDSHAKE;
+  int ret;
+
+  union {
+    const tls_clt_t *clt;
+    const tls_srv_t *srv;
+  } opt = { optval };
+
+  if (client && optlen != sizeof(tls_clt_t)) {
+    errno = EINVAL; // FIXME
+    return -1;
+  } else if (!client && optlen != sizeof(tls_srv_t)) {
+    errno = EINVAL; // FIXME
+    return -1;
   }
 
-  return 0;
+  if (!tls->ssl) {
+    tls->ssl = ssl_new(fd, client);
+    if (!tls->ssl)
+      return -1;
+  }
+
+  /* Prepare callbacks for the handshake. */
+  SSL_set_ex_data(tls->ssl, 0, (void *) optval);
+  if (client)
+    SSL_set_psk_client_callback(tls->ssl, opt.clt->psk ? psk_clt : NULL);
+  else
+    SSL_set_psk_server_callback(tls->ssl, opt.srv->psk ? psk_srv : NULL);
+
+  ret = SSL_do_handshake(tls->ssl);
+
+  /* Remove callbacks from the handshake. */
+  SSL_set_ex_data(tls->ssl, 0, NULL);
+  if (client)
+    SSL_set_psk_client_callback(tls->ssl, NULL);
+  else
+    SSL_set_psk_server_callback(tls->ssl, NULL);
+
+  if (ret == 1)
+    return 0;
+
+  return o2e(tls, ret);
 }
 
 int
-tls_setsockopt(tls_t *tls, int optname, const void *optval, socklen_t optlen)
+tls_setsockopt(tls_t *tls, int fd, int optname,
+               const void *optval, socklen_t optlen)
 {
   lock_auto_t *lock = wrlock(tls);
 
   switch (optname) {
-  case TLS_OPT_HANDSHAKE: return handshake(tls, optval, optlen);
-  case TLS_OPT_PEER_NAME: errno = ENOSYS; return -1; // TODO
-  case TLS_OPT_PEER_CERT: errno = ENOSYS; return -1; // TODO
-  case TLS_OPT_SELF_NAME: errno = ENOSYS; return -1; // TODO
-  case TLS_OPT_SELF_CERT: errno = ENOSYS; return -1; // TODO
-  case TLS_OPT_MISC: tls->misc = optval; return 0;
-  case TLS_OPT_PSK: return psk(tls, optval, optlen);
-  default: errno = ENOPROTOOPT; return -1; // FIXME
+  case TLS_OPT_CLT_HANDSHAKE:
+  case TLS_OPT_SRV_HANDSHAKE:
+    return handshake(tls, fd, optname, optval, optlen);
+
+  default:
+    errno = ENOPROTOOPT; // FIXME
+    return -1;
   }
 }
 
@@ -421,10 +392,9 @@ bio_ctrl(BIO *bio, int cmd, long iarg, void *parg)
 static int
 bio_read_ex(BIO *bio, char *buf, size_t cnt, size_t *bytes)
 {
-  tls_t *tls = BIO_get_data(bio);
   ssize_t ret;
 
-  ret = NEXT(read)(tls->fd, buf, cnt);
+  ret = NEXT(read)((int) (intptr_t) BIO_get_data(bio), buf, cnt);
   if (ret <= 0)
     return 0;
 
@@ -435,10 +405,9 @@ bio_read_ex(BIO *bio, char *buf, size_t cnt, size_t *bytes)
 static int
 bio_write_ex(BIO *bio, const char *buf, size_t cnt, size_t *bytes)
 {
-  tls_t *tls = BIO_get_data(bio);
   ssize_t ret;
 
-  ret = NEXT(write)(tls->fd, buf, cnt);
+  ret = NEXT(write)((int) (intptr_t) BIO_get_data(bio), buf, cnt);
   if (ret <= 0)
     return 0;
 
@@ -452,8 +421,11 @@ constructor(void)
   int sid = BIO_get_new_index() | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR;
   int did = BIO_get_new_index() | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR;
 
-  stream = BIO_meth_new(sid, "tlssock-stream");
-  dgram = BIO_meth_new(did, "tlssock-dgram");
+  stream = BIO_meth_new(sid, "tlssocks");
+  dgram = BIO_meth_new(did, "tlssockd");
+
+  BIO_meth_set_ctrl(stream, bio_ctrl);
+  BIO_meth_set_ctrl(dgram, bio_ctrl);
 
   BIO_meth_set_ctrl(stream, bio_ctrl);
   BIO_meth_set_ctrl(dgram, bio_ctrl);

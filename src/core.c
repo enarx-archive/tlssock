@@ -38,12 +38,6 @@ is_tls_type(int type)
 }
 
 bool
-is_tls_protocol(int protocol)
-{
-    return protocol == IPPROTO_TLS_CLT || protocol == IPPROTO_TLS_SRV;
-}
-
-bool
 is_tls_inner_protocol(int protocol)
 {
     return protocol == 0 || protocol == IPPROTO_TCP || protocol == IPPROTO_UDP;

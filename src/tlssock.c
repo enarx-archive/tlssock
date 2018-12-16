@@ -41,10 +41,43 @@ static int
 inner_protocol(int protocol)
 {
   switch (protocol) {
-  case IPPROTO_TLS_CLT: return 0;
-  case IPPROTO_TLS_SRV: return 0;
+  case IPPROTO_TLS: return 0;
   default: return protocol;
   }
+}
+
+static tls_t *
+test_tls_new(int fd)
+{
+  int protocol;
+  int domain;
+  int type;
+
+  if (getsockopt_int(fd, SOL_SOCKET, SO_DOMAIN, &domain) < 0)
+    return NULL;
+
+  if (getsockopt_int(fd, SOL_SOCKET, SO_TYPE, &type) < 0)
+    return NULL;
+
+  if (getsockopt_int(fd, SOL_SOCKET, SO_PROTOCOL, &protocol) < 0)
+    return NULL;
+
+  if (!is_tls_domain(domain)) {
+    errno = EINVAL; // FIXME
+    return NULL;
+  }
+
+  if (!is_tls_type(type)) {
+    errno = EINVAL; // FIXME
+    return NULL;
+  }
+
+  if (!is_tls_inner_protocol(protocol)) {
+    errno = EINVAL; // FIXME
+    return NULL;
+  }
+
+  return tls_new();
 }
 
 int
@@ -67,7 +100,7 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
     if (lis) {
       tls_auto_t *con = NULL;
 
-      con = tls_new(fd, tls_is_client(lis));
+      con = test_tls_new(fd);
       if (!con || !idx_set(fd, con, NULL)) {
         close(fd);
         return -1;
@@ -113,21 +146,23 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
   int ret;
 
   /* Pass TLS level options into the tls_t layer. */
-  if (level == IPPROTO_TLS_CLT || level == IPPROTO_TLS_SRV) {
+  if (level == IPPROTO_TLS) {
     tls_auto_t *tls = NULL;
+
     tls = idx_get(sockfd);
-    if (!tls || tls_is_client(tls) != (level == IPPROTO_TLS_CLT)) {
+    if (!tls) {
       errno = EINVAL; // FIXME
       return -1;
     }
 
-    return tls_getsockopt(tls, optname, optval, optlen);
+    return tls_getsockopt(tls, sockfd, optname, optval, optlen);
   }
 
   ret = NEXT(getsockopt)(sockfd, level, optname, optval, optlen);
 
   /* Translate the inner protocol to the outer one. */
-  if (ret >= 0 && level == SOL_SOCKET && optname == SO_PROTOCOL && is_tls_inner_protocol(*prot)) {
+  if (ret >= 0 && level == SOL_SOCKET && optname == SO_PROTOCOL &&
+      is_tls_inner_protocol(*prot)) {
     tls_auto_t *tls = NULL;
 
     if (*optlen != sizeof(*prot)) {
@@ -137,7 +172,7 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 
     tls = idx_get(sockfd);
     if (tls)
-      *prot = tls_is_client(tls) ? IPPROTO_TLS_CLT : IPPROTO_TLS_SRV;
+      *prot = IPPROTO_TLS;
   }
 
   return ret;
@@ -194,7 +229,7 @@ read(int fd, void *buf, size_t count)
   if (!tls)
     return NEXT(read)(fd, buf, count);
 
-  return tls_read(tls, buf, count);
+  return tls_read(tls, fd, buf, count);
 }
 
 ssize_t
@@ -209,7 +244,7 @@ recv(int sockfd, void *buf, size_t len, int flags)
   if (flags != 0)
     return EINVAL; // FIXME
 
-  return tls_read(tls, buf, len);
+  return tls_read(tls, sockfd, buf, len);
 }
 
 ssize_t
@@ -242,7 +277,7 @@ send(int sockfd, const void *buf, size_t len, int flags)
   if (flags != 0)
     return EINVAL; // FIXME
 
-  return tls_write(tls, buf, len);
+  return tls_write(tls, sockfd, buf, len);
 }
 
 ssize_t
@@ -271,14 +306,14 @@ setsockopt(int sockfd, int level, int optname,
   tls_auto_t *tls = NULL;
 
   /* Pass TLS level options into the tls_t layer. */
-  if (level == IPPROTO_TLS_CLT || level == IPPROTO_TLS_SRV) {
+  if (level == IPPROTO_TLS) {
     tls = idx_get(sockfd);
-    if (!tls || tls_is_client(tls) != (level == IPPROTO_TLS_CLT)) {
+    if (!tls) {
       errno = EINVAL; // FIXME
       return -1;
     }
 
-    return tls_setsockopt(tls, optname, optval, optlen);
+    return tls_setsockopt(tls, sockfd, optname, optval, optlen);
   }
 
   /* We only override SO_PROTOCOL on SOL_SOCKET. */
@@ -292,12 +327,11 @@ setsockopt(int sockfd, int level, int optname,
   }
 
   const int *const protocol = optval;
-  const bool client = *protocol == IPPROTO_TLS_CLT;
 
   /* The caller wants to transition to TLS. */
-  if (is_tls_protocol(*protocol)) {
+  if (*protocol == IPPROTO_TLS) {
     /* Create the new TLS instance. */
-    tls = tls_new(sockfd, client);
+    tls = test_tls_new(sockfd);
     if (!tls)
       return -1;
 
@@ -305,9 +339,8 @@ setsockopt(int sockfd, int level, int optname,
     if (idx_set(sockfd, tls, &already))
       return 0;
 
-    /* Otherwise, set a context specific error. */
     if (already)
-      errno = tls_is_client(already) == client ? EALREADY : EINVAL; // FIXME
+      errno = EALREADY; // FIXME
 
     return -1;
 
@@ -337,9 +370,8 @@ socket(int domain, int type, int protocol)
     return fd;
 
   switch (protocol) {
-  case IPPROTO_TLS_SRV:
-  case IPPROTO_TLS_CLT:
-    tls = tls_new(fd, protocol == IPPROTO_TLS_CLT);
+  case IPPROTO_TLS:
+    tls = test_tls_new(fd);
     if (!tls || !idx_set(fd, tls, NULL)) {
       close(fd);
       return -1;
@@ -358,5 +390,5 @@ write(int fd, const void *buf, size_t count)
   if (!tls)
     return NEXT(write)(fd, buf, count);
 
-  return tls_write(tls, buf, count);
+  return tls_write(tls, fd, buf, count);
 }

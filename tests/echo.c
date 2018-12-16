@@ -57,25 +57,8 @@ addrlen(sockaddr_t *addr)
   }
 }
 
-static int
-srv_cb(tls_opt_psk_srv_t *srv, void *misc, const char *username,
-       int (*callback)(tls_opt_psk_srv_t *srv,
-                       const uint8_t *key, size_t keylen))
-{
-  int *m = misc;
-
-  assert(*m == 17);
-
-  if (strcmp(username, psku) != 0)
-    return -1;
-
-  return callback(srv, (void *) pskk, strlen(pskk));
-}
-
-static int
-clt_cb(tls_opt_psk_clt_t *clt, void *misc,
-       int (*callback)(tls_opt_psk_clt_t *clt, const char *username,
-                       const uint8_t *key, size_t keylen))
+static ssize_t
+srv_cb(void *misc, const char *username, uint8_t **key)
 {
   int *m = misc;
 
@@ -84,7 +67,31 @@ clt_cb(tls_opt_psk_clt_t *clt, void *misc,
   if (!psku || !pskk)
     return -1;
 
-  return callback(clt, psku, (void *) pskk, strlen(pskk));
+  if (strcmp(username, psku) != 0)
+    return -1;
+
+  *key = (uint8_t *) strdup(pskk);
+  assert(*key);
+  return strlen(pskk);
+}
+
+static ssize_t
+clt_cb(void *misc, const char *hint, char **username, uint8_t **key)
+{
+  int *m = misc;
+
+  assert(*m == 17);
+
+  if (!psku || !pskk)
+    return -1;
+
+  *username = strdup(psku);
+  *key = (uint8_t *) strdup(pskk);
+
+  assert(*username);
+  assert(*key);
+
+  return strlen(pskk);
 }
 
 int
@@ -148,7 +155,7 @@ main(int argc, char *argv[])
     goto usage;
   }
 
-  fd = socket(addr.addr.sa_family, type, IPPROTO_TLS_SRV);
+  fd = socket(addr.addr.sa_family, type, IPPROTO_TLS);
   assert(fd >= 0);
 
   assert(bind(fd, &addr.addr, addrlen(&addr)) == 0);
@@ -158,24 +165,22 @@ main(int argc, char *argv[])
   pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
+    tls_clt_t clt = { .misc = &misc };
     assert(close(fd) == 0);
 
-    fd = socket(addr.addr.sa_family, type, IPPROTO_TLS_CLT);
+    fd = socket(addr.addr.sa_family, type, IPPROTO_TLS);
     assert(fd >= 0);
 
     assert(connect(fd, &addr.addr, addrlen(&addr)) == 0);
 
-    assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_MISC,
-                      &misc, sizeof(misc)) == 0);
-
     if (psku && pskk) {
-      assert(setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_PSK, &clt_cb, 0) == 0);
+      clt.psk = clt_cb;
     } else {
       fprintf(stderr, "No authentication method specified!\n");
       goto usage;
     }
 
-    if (setsockopt(fd, IPPROTO_TLS_CLT, TLS_OPT_HANDSHAKE, NULL, 0) != 0) {
+    if (setsockopt(fd, IPPROTO_TLS, TLS_OPT_CLT_HANDSHAKE, &clt, sizeof(clt)) != 0) {
       fprintf(stderr, "client: %d: %m\n", errno);
       abort();
     }
@@ -192,22 +197,21 @@ main(int argc, char *argv[])
     return 0;
   }
 
+  tls_srv_t srv = { .misc = &misc };
+
   int tmp = accept(fd, NULL, NULL);
   assert(tmp >= 0);
   assert(close(fd) == 0);
   fd = tmp;
 
-  assert(setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_MISC,
-                    &misc, sizeof(misc)) == 0);
-
   if (psku && pskk) {
-    assert(setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_PSK, &srv_cb, 0) == 0);
+    srv.psk = srv_cb;
   } else {
     fprintf(stderr, "No authentication method specified!\n");
     goto usage;
   }
 
-  if (setsockopt(fd, IPPROTO_TLS_SRV, TLS_OPT_HANDSHAKE, NULL, 0) != 0) {
+  if (setsockopt(fd, IPPROTO_TLS, TLS_OPT_SRV_HANDSHAKE, &srv, sizeof(srv)) != 0) {
     fprintf(stderr, "server: %d: %m\n", errno);
     abort();
   }

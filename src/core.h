@@ -35,9 +35,6 @@ bool
 is_tls_type(int type);
 
 bool
-is_tls_protocol(int protocol);
-
-bool
 is_tls_inner_protocol(int protocol);
 
 int
