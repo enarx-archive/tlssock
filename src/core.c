@@ -29,19 +29,19 @@
 bool
 is_tls_domain(int domain)
 {
-    return domain == AF_INET || domain == AF_INET6;
+  return domain == AF_INET || domain == AF_INET6;
 }
 
 bool
 is_tls_type(int type)
 {
-    return type == SOCK_STREAM || type == SOCK_DGRAM;
+  return type == SOCK_STREAM || type == SOCK_DGRAM;
 }
 
 bool
 is_tls_inner_protocol(int protocol)
 {
-    return protocol == 0 || protocol == IPPROTO_TCP || protocol == IPPROTO_UDP;
+  return protocol == 0 || protocol == IPPROTO_TCP || protocol == IPPROTO_UDP;
 }
 
 int
