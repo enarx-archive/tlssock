@@ -38,12 +38,13 @@ typedef union {
     struct sockaddr addr;
 } sockaddr_t;
 
-static char *psku = NULL;
-static char *pskk = NULL;
-static const char *sopts = "dp:";
+static const char *psku = NULL;
+static const char *pskk = NULL;
+static const char *sopts = "du:k:";
 static const struct option lopts[] = {
   { "datagram", no_argument, .val = 'd' },
-  { "psk", required_argument, .val = 'p' },
+  { "user", required_argument, .val = 'u' },
+  { "key", required_argument, .val = 'k' },
   {}
 };
 
@@ -62,13 +63,11 @@ srv_cb(void *misc, const char *username, uint8_t **key)
 {
   int *m = misc;
 
+  assert(m);
+  assert(key);
   assert(*m == 17);
-
-  if (!psku || !pskk)
-    return -1;
-
-  if (strcmp(username, psku) != 0)
-    return -1;
+  assert(username);
+  assert(strcmp(username, psku) == 0);
 
   *key = (uint8_t *) strdup(pskk);
   assert(*key);
@@ -110,19 +109,12 @@ main(int argc, char *argv[])
       type = SOCK_DGRAM;
       break;
 
-    case 'p':
-      free(psku);
+    case 'u':
+      psku = optarg;
+      break;
 
-      psku = strdup(optarg);
-      assert(psku);
-
-      pskk = strchr(psku, ':');
-      if (!pskk) {
-        fprintf(stderr, "Invalid PSK argument!\n");
-        goto usage;
-      }
-
-      *pskk++ = 0;
+    case 'k':
+      pskk = optarg;
 
       switch (strlen(pskk)) {
       case 16: break;
@@ -193,7 +185,6 @@ main(int argc, char *argv[])
 
     assert(close(fd) == 0);
 
-    free(psku);
     return 0;
   }
 
@@ -224,12 +215,10 @@ main(int argc, char *argv[])
   assert(waitpid(pid, &tmp, 0) == pid);
   assert(WEXITSTATUS(tmp) == 0);
 
-  free(psku);
   return 0;
 
 usage:
-  fprintf(stderr, "%s [-d] [-p USER:KEY] HOST\n", argv[0]);
-  free(psku);
+  fprintf(stderr, "%s [-d] [-u USER -k KEY] HOST\n", argv[0]);
   return -1;
 }
 

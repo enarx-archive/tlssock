@@ -59,7 +59,7 @@ core = [
 ]
 
 tests = {
-  'TCP PSK': ['-p', 'foo:0123456789abcdef'],
+  'TCP PSK': ['-u', 'foo', '-k', '0123456789abcdef'],
 }
 
 foreach v: variants
