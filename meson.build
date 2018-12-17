@@ -58,10 +58,6 @@ core = [
   'src/tls.h',
 ]
 
-tests = {
-  'TCP PSK': ['-u', 'foo', '-k', '0123456789abcdef'],
-}
-
 foreach v: variants
   if not v.found()
     continue
@@ -86,8 +82,12 @@ foreach v: variants
   echo = executable('echo-' + name, 'tests/echo.c', link_with: lib)
 
   foreach v, i: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
+    tests = {
+      'TCP PSK': ['-u', 'foo', '-k', '0123456789abcdef', '-T', i],
+    }
+
     foreach n, a: tests
-      test(name + ': ' + v + ' ' + n, echo, args: a + [i])
+      test(name + ': ' + v + ' ' + n, echo, args: a)
     endforeach
   endforeach
 endforeach

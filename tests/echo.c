@@ -41,8 +41,9 @@ typedef union {
 
 static const char *psku = NULL;
 static const char *pskk = NULL;
-static const char *sopts = "u:k:";
+static const char *sopts = "T:u:k:";
 static const struct option lopts[] = {
+  { "tcp", required_argument, .val = 'T' },
   { "user", required_argument, .val = 'u' },
   { "key", required_argument, .val = 'k' },
   {}
@@ -102,8 +103,26 @@ main(int argc, char *argv[])
   int fd = -1;
   pid_t pid;
 
+  srand(getpid());
+
   for (int c; (c = getopt_long(argc, argv, sopts, lopts, NULL)) >= 0; ) {
     switch (c) {
+    case 'T':
+      if (inet_pton(AF_INET, optarg, &addr.in.sin_addr) == 0) {
+        addr.in.sin_port = htons(rand() % (INT16_MAX - 1024) + 1024);
+        addr.in.sin_family = AF_INET;
+        break;
+      }
+
+      if (inet_pton(AF_INET6, optarg, &addr.in6.sin6_addr) == 0) {
+        addr.in6.sin6_port = htons(rand() % (INT16_MAX - 1024) + 1024);
+        addr.in6.sin6_family = AF_INET6;
+        break;
+      }
+
+      fprintf(stderr, "Invalid IP address: %s!\n", optarg);
+      goto usage;
+
     case 'u':
       psku = optarg;
       break;
@@ -127,18 +146,8 @@ main(int argc, char *argv[])
     }
   }
 
-  if (optind != argc - 1)
-    goto usage;
-
-  srand(getpid());
-  if (inet_pton(AF_INET, argv[optind], &addr.in.sin_addr) == 0) {
-    addr.in.sin_port = htons(rand() % (INT16_MAX - 1024) + 1024);
-    addr.in.sin_family = AF_INET;
-  } else if (inet_pton(AF_INET6, argv[optind], &addr.in6.sin6_addr) == 0) {
-    addr.in6.sin6_port = htons(rand() % (INT16_MAX - 1024) + 1024);
-    addr.in6.sin6_family = AF_INET6;
-  } else {
-    fprintf(stderr, "Invalid IP address!\n");
+  if (addr.addr.sa_family == 0) {
+    fprintf(stderr, "Address not specified!\n");
     goto usage;
   }
 
@@ -213,7 +222,7 @@ main(int argc, char *argv[])
   return 0;
 
 usage:
-  fprintf(stderr, "%s [-u USER -k KEY] HOST\n", argv[0]);
+  fprintf(stderr, "%s [-u USER -k KEY] -T HOST\n", argv[0]);
   return -1;
 }
 
