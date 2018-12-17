@@ -3,6 +3,8 @@ project('tlssock', 'c',
   version: '0.1.0',
 )
 
+cc = meson.get_compiler('c')
+
 add_project_arguments(
   '-I' + meson.current_source_dir(),
   '-I' + meson.current_build_dir(),
@@ -23,14 +25,18 @@ add_project_arguments(
   '-Wtype-limits',
   '-Wunused-function',
   '-Wno-missing-field-initializers',
-  '-Wno-unused-command-line-argument',
   '-Wno-unused-parameter',
   '-Wno-unknown-pragmas',
   language: 'c'
 )
 
+# Work around the fact that clang is overly-zealous in detecting unused
+# variables when the cleanup attribute is used.
+if cc.get_id() == 'clang'
+  add_project_arguments('-Wno-unused-variable', language: 'c')
+endif
+
 pkg = import('pkgconfig')
-cc = meson.get_compiler('c')
 dl = cc.find_library('dl', required: false)
 
 openssl = dependency('openssl', version: '>=1.1.0', required: false)

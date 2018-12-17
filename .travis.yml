@@ -16,7 +16,7 @@ language: c
 #        - PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig:/usr/local/opt/zlib/lib/pkgconfig
 
 compiler:
-#  - clang
+  - clang
   - gcc
 
 os: linux
