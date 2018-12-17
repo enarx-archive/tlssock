@@ -1,3 +1,4 @@
+/* vim: set tabstop=8 shiftwidth=2 softtabstop=2 expandtab smarttab colorcolumn=80: */
 /*
  * Copyright 2018 Red Hat, Inc.
  *
