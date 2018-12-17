@@ -58,7 +58,11 @@ core = [
   'src/tls.h',
 ]
 
-foreach v : variants
+tests = {
+  'TCP PSK': ['-p', 'foo:0123456789abcdef'],
+}
+
+foreach v: variants
   if not v.found()
     continue
   endif
@@ -80,12 +84,10 @@ foreach v : variants
   )
 
   echo = executable('echo-' + name, 'tests/echo.c', link_with: lib)
-  test(name + ': PSK IPv4 TCP', echo,
-       args: ['-p', 'foo:0123456789abcdef', '127.0.0.1'])
-  test(name + ': PSK IPv6 TCP', echo,
-       args: ['-p', 'foo:0123456789abcdef', '::1'])
-  #test(name + ': PSK IPv4 UDP', echo,
-  #     args: ['-d', '-p', 'foo:0123456789abcdef', '127.0.0.1'])
-  #test(name + ': PSK IPv6 UDP', echo,
-  #     args: ['-d', '-p', 'foo:0123456789abcdef', '::1'])
+
+  foreach v, i: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
+    foreach n, a: tests
+      test(name + ': ' + v + ' ' + n, echo, args: a + [i])
+    endforeach
+  endforeach
 endforeach
