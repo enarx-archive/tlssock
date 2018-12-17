@@ -224,13 +224,13 @@ static unsigned int
 psk_clt(SSL *ssl, const char *hint, char *id, unsigned int imax,
         unsigned char *psk, unsigned int pmax)
 {
-  const tls_clt_handshake_t *clt = SSL_get_ex_data(ssl, 0);
+  const tls_handshake_t *hs = SSL_get_ex_data(ssl, 0);
   unsigned int ret = 0;
   uint8_t *k = NULL;
   char *u = NULL;
   ssize_t l = 0;
 
-  l = clt->psk(clt->misc, hint, &u, &k);
+  l = hs->clt.psk(hs->clt.misc, hint, &u, &k);
   if (l < 0)
     return 0;
 
@@ -251,12 +251,12 @@ static unsigned int
 psk_srv(SSL *ssl, const char *identity, unsigned char *psk,
         unsigned int max_psk_len)
 {
-  const tls_srv_handshake_t *srv = SSL_get_ex_data(ssl, 0);
+  const tls_handshake_t *hs = SSL_get_ex_data(ssl, 0);
   unsigned int ret = 0;
   uint8_t *k = NULL;
   ssize_t l = 0;
 
-  l = srv->psk(srv->misc, identity, &k);
+  l = hs->srv.psk(hs->srv.misc, identity, &k);
   if (l < 0)
     return 0;
 

@@ -308,12 +308,12 @@ get_flags(int fd, bool client)
 static int
 psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
 {
-  const tls_clt_handshake_t *clt = gnutls_session_get_ptr(session);
+  const tls_handshake_t *hs = gnutls_session_get_ptr(session);
   uint8_t *k = NULL;
   char *u = NULL;
   ssize_t l = 0;
 
-  l = clt->psk(clt->misc, gnutls_psk_client_get_hint(session), &u, &k);
+  l = hs->clt.psk(hs->clt.misc, gnutls_psk_client_get_hint(session), &u, &k);
   if (l < 0)
     return -1;
 
@@ -347,11 +347,11 @@ psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
 static int
 psk_srv(gnutls_session_t session, const char *username, gnutls_datum_t *key)
 {
-  const tls_srv_handshake_t *srv = gnutls_session_get_ptr(session);
+  const tls_handshake_t *hs = gnutls_session_get_ptr(session);
   uint8_t *k = NULL;
   ssize_t l = 0;
 
-  l = srv->psk(srv->misc, username, &k);
+  l = hs->srv.psk(hs->srv.misc, username, &k);
   if (l < 0)
     return -1;
 
