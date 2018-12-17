@@ -41,9 +41,8 @@ typedef union {
 
 static const char *psku = NULL;
 static const char *pskk = NULL;
-static const char *sopts = "du:k:";
+static const char *sopts = "u:k:";
 static const struct option lopts[] = {
-  { "datagram", no_argument, .val = 'd' },
   { "user", required_argument, .val = 'u' },
   { "key", required_argument, .val = 'k' },
   {}
@@ -97,7 +96,6 @@ clt_cb(void *misc, char **username, uint8_t **key)
 int
 main(int argc, char *argv[])
 {
-  int type = SOCK_STREAM;
   char buffer[1024] = {};
   sockaddr_t addr = {};
   int misc = 17;
@@ -106,10 +104,6 @@ main(int argc, char *argv[])
 
   for (int c; (c = getopt_long(argc, argv, sopts, lopts, NULL)) >= 0; ) {
     switch (c) {
-    case 'd':
-      type = SOCK_DGRAM;
-      break;
-
     case 'u':
       psku = optarg;
       break;
@@ -148,7 +142,7 @@ main(int argc, char *argv[])
     goto usage;
   }
 
-  fd = socket(addr.addr.sa_family, type, IPPROTO_TLS);
+  fd = socket(addr.addr.sa_family, SOCK_STREAM, IPPROTO_TLS);
   assert(fd >= 0);
 
   assert(bind(fd, &addr.addr, addrlen(&addr)) == 0);
@@ -161,7 +155,7 @@ main(int argc, char *argv[])
     tls_clt_handshake_t clt = { .misc = &misc };
     assert(close(fd) == 0);
 
-    fd = socket(addr.addr.sa_family, type, IPPROTO_TLS);
+    fd = socket(addr.addr.sa_family, SOCK_STREAM, IPPROTO_TLS);
     assert(fd >= 0);
 
     assert(connect(fd, &addr.addr, addrlen(&addr)) == 0);
@@ -219,7 +213,7 @@ main(int argc, char *argv[])
   return 0;
 
 usage:
-  fprintf(stderr, "%s [-d] [-u USER -k KEY] HOST\n", argv[0]);
+  fprintf(stderr, "%s [-u USER -k KEY] HOST\n", argv[0]);
   return -1;
 }
 
