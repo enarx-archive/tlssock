@@ -83,7 +83,7 @@ foreach v: variants
 
   foreach v, i: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
     tests = {
-      'TCP PSK': ['-u', 'foo', '-k', '0123456789abcdef', '-T', i],
+      'TCP PSK': ['-u', 'foo', '-k', '7df28f5439b5a051cc138b6e12128264', '-T', i],
     }
 
     foreach n, a: tests

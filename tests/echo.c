@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -59,6 +60,51 @@ addrlen(sockaddr_t *addr)
   }
 }
 
+static uint8_t
+hex2low(uint8_t c)
+{
+  static uint8_t table[UINT8_MAX] = {
+    ['0'] = 1, ['1'] = 2, ['2'] = 3, ['3'] = 4, ['4'] = 5,
+    ['5'] = 6, ['6'] = 7, ['7'] = 8, ['8'] = 9, ['9'] = 10,
+    ['A'] = 11, ['B'] = 12, ['C'] = 13, ['D'] = 14, ['E'] = 15, ['F'] = 16,
+    ['a'] = 11, ['b'] = 12, ['c'] = 13, ['d'] = 14, ['e'] = 15, ['f'] = 16,
+  };
+
+  return table[c] - 1;
+}
+
+static bool
+hex2bin(const char *hex, uint8_t *bin, size_t len)
+{
+  if (strlen(hex) != len * 2)
+    return false;
+
+  for (size_t i = 0; i < len * 2; i += 2) {
+    uint8_t h = hex2low(hex[i]);
+    uint8_t l = hex2low(hex[i + 1]);
+
+    if (h == UINT8_MAX || l == UINT8_MAX)
+      return false;
+
+    if (bin)
+      bin[i / 2] = h << 4 | l;
+  }
+
+  return true;
+}
+
+static ssize_t
+keydup(uint8_t **key)
+{
+  size_t size = strlen(pskk) / 2;
+
+  *key = malloc(size);
+  assert(*key);
+  assert(hex2bin(pskk, *key, size));
+
+  return size;
+}
+
 static ssize_t
 srv_cb(void *misc, const char *username, uint8_t **key)
 {
@@ -70,9 +116,7 @@ srv_cb(void *misc, const char *username, uint8_t **key)
   assert(username);
   assert(strcmp(username, psku) == 0);
 
-  *key = (uint8_t *) strdup(pskk);
-  assert(*key);
-  return strlen(pskk);
+  return keydup(key);
 }
 
 static ssize_t
@@ -86,12 +130,9 @@ clt_cb(void *misc, char **username, uint8_t **key)
     return -1;
 
   *username = strdup(psku);
-  *key = (uint8_t *) strdup(pskk);
-
   assert(*username);
-  assert(*key);
 
-  return strlen(pskk);
+  return keydup(key);
 }
 
 int
@@ -130,10 +171,7 @@ main(int argc, char *argv[])
     case 'k':
       pskk = optarg;
 
-      switch (strlen(pskk)) {
-      case 16: break;
-      case 32: break;
-      default:
+      if (!hex2bin(pskk, NULL, strlen(pskk) / 2)) {
         fprintf(stderr, "Invalid PSK key!\n");
         goto usage;
       }
