@@ -32,10 +32,10 @@ typedef struct {
   void *misc;
 
   ssize_t (*psk)(void *misc, const char *hint, char **username, uint8_t **key);
-} tls_clt_t;
+} tls_clt_handshake_t;
 
 typedef struct {
   void *misc;
 
   ssize_t (*psk)(void *misc, const char *username, uint8_t **key);
-} tls_srv_t;
+} tls_srv_handshake_t;

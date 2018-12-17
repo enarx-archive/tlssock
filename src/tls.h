@@ -20,11 +20,22 @@
 
 #pragma once
 
+#include "tlssock.h"
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdbool.h>
 
 #define tls_auto_t tls_t __attribute__((cleanup(tls_cleanup)))
+
+typedef union {
+  tls_clt_handshake_t clt;
+  tls_srv_handshake_t srv;
+} tls_handshake_t;
+
+typedef union {
+  tls_handshake_t handshake;
+} tls_opt_t;
 
 typedef struct tls tls_t;
 
@@ -51,5 +62,4 @@ tls_getsockopt(tls_t *tls, int fd, int optname,
                void *optval, socklen_t *optlen);
 
 int
-tls_setsockopt(tls_t *tls, int fd, int optname,
-               const void *optval, socklen_t optlen);
+tls_handshake(tls_t *tls, int fd, bool client, const tls_handshake_t *hs);

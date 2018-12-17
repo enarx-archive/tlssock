@@ -165,7 +165,7 @@ main(int argc, char *argv[])
   pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
-    tls_clt_t clt = { .misc = &misc };
+    tls_clt_handshake_t clt = { .misc = &misc };
     assert(close(fd) == 0);
 
     fd = socket(addr.addr.sa_family, type, IPPROTO_TLS);
@@ -197,7 +197,7 @@ main(int argc, char *argv[])
     return 0;
   }
 
-  tls_srv_t srv = { .misc = &misc };
+  tls_srv_handshake_t srv = { .misc = &misc };
 
   int tmp = accept(fd, NULL, NULL);
   assert(tmp >= 0);

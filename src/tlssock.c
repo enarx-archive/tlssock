@@ -80,6 +80,30 @@ test_tls_new(int fd)
   return tls_new();
 }
 
+static const tls_opt_t *
+tlsopt(int optname, const void *optval, socklen_t optlen)
+{
+  switch (optname) {
+  case TLS_CLT_HANDSHAKE:
+    if (optlen == sizeof(tls_clt_handshake_t))
+      return optval;
+
+    errno = EINVAL;
+    return NULL;
+
+  case TLS_SRV_HANDSHAKE:
+    if (optlen == sizeof(tls_srv_handshake_t))
+      return optval;
+
+    errno = EINVAL;
+    return NULL;
+
+  default:
+    errno = ENOPROTOOPT;
+    return NULL;
+  }
+}
+
 int
 accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
@@ -307,13 +331,25 @@ setsockopt(int sockfd, int level, int optname,
 
   /* Pass TLS level options into the tls_t layer. */
   if (level == IPPROTO_TLS) {
+    const tls_opt_t *opt;
+
+    opt = tlsopt(optname, optval, optlen);
+    if (!opt)
+      return -1;
+
     tls = idx_get(sockfd);
     if (!tls) {
       errno = EINVAL; // FIXME
       return -1;
     }
 
-    return tls_setsockopt(tls, sockfd, optname, optval, optlen);
+    switch (optname) {
+    case TLS_CLT_HANDSHAKE:
+      return tls_handshake(tls, sockfd, true, &opt->handshake);
+
+    case TLS_SRV_HANDSHAKE:
+      return tls_handshake(tls, sockfd, false, &opt->handshake);
+    }
   }
 
   /* We only override SO_PROTOCOL on SOL_SOCKET. */

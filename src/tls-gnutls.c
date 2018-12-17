@@ -308,7 +308,7 @@ get_flags(int fd, bool client)
 static int
 psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
 {
-  const tls_clt_t *clt = gnutls_session_get_ptr(session);
+  const tls_clt_handshake_t *clt = gnutls_session_get_ptr(session);
   uint8_t *k = NULL;
   char *u = NULL;
   ssize_t l = 0;
@@ -347,7 +347,7 @@ psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
 static int
 psk_srv(gnutls_session_t session, const char *username, gnutls_datum_t *key)
 {
-  const tls_srv_t *srv = gnutls_session_get_ptr(session);
+  const tls_srv_handshake_t *srv = gnutls_session_get_ptr(session);
   uint8_t *k = NULL;
   ssize_t l = 0;
 
@@ -366,15 +366,10 @@ psk_srv(gnutls_session_t session, const char *username, gnutls_datum_t *key)
   return key->data ? 0 : -1;
 }
 
-static int
-handshake(tls_t *tls, int fd, bool client, const void *optval, socklen_t optlen)
+int
+tls_handshake(tls_t *tls, int fd, bool client, const tls_handshake_t *hs)
 {
   int ret = -1;
-
-  union {
-    const tls_clt_t *clt;
-    const tls_srv_t *srv;
-  } opt = { optval };
 
   if (!tls->session) {
     static const char *priority = "+ECDHE-PSK:+DHE-PSK:+PSK";
@@ -400,7 +395,7 @@ handshake(tls_t *tls, int fd, bool client, const void *optval, socklen_t optlen)
       goto error;
   }
 
-  if (client && opt.clt->psk) {
+  if (client && hs->clt.psk) {
     ret = g2e(gnutls_psk_allocate_client_credentials(&tls->creds.clt.psk));
     if (ret < 0)
       goto error;
@@ -410,7 +405,7 @@ handshake(tls_t *tls, int fd, bool client, const void *optval, socklen_t optlen)
                                      tls->creds.clt.psk));
     if (ret < 0)
       goto error;
-  } else if (!client && opt.srv->psk) {
+  } else if (!client && hs->srv.psk) {
     ret = g2e(gnutls_psk_allocate_server_credentials(&tls->creds.srv.psk));
     if (ret < 0)
       goto error;
@@ -422,7 +417,7 @@ handshake(tls_t *tls, int fd, bool client, const void *optval, socklen_t optlen)
       goto error;
   }
 
-  gnutls_session_set_ptr(tls->session, (void *) optval);
+  gnutls_session_set_ptr(tls->session, (void *) hs);
   ret = g2e(gnutls_handshake(tls->session));
   gnutls_session_set_ptr(tls->session, NULL);
   tls_creds_clear(tls, client);
@@ -432,21 +427,4 @@ handshake(tls_t *tls, int fd, bool client, const void *optval, socklen_t optlen)
 error:
   tls_clear(tls);
   return ret;
-}
-
-int
-tls_setsockopt(tls_t *tls, int fd, int optname,
-               const void *optval, socklen_t optlen)
-{
-  lock_auto_t *lock = wrlock(tls);
-
-  switch (optname) {
-  case TLS_CLT_HANDSHAKE:
-  case TLS_SRV_HANDSHAKE:
-    return handshake(tls, fd, optname == TLS_CLT_HANDSHAKE, optval, optlen);
-
-  default:
-    errno = ENOPROTOOPT; // FIXME
-    return -1;
-  }
 }

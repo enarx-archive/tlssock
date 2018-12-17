@@ -224,7 +224,7 @@ static unsigned int
 psk_clt(SSL *ssl, const char *hint, char *id, unsigned int imax,
         unsigned char *psk, unsigned int pmax)
 {
-  const tls_clt_t *clt = SSL_get_ex_data(ssl, 0);
+  const tls_clt_handshake_t *clt = SSL_get_ex_data(ssl, 0);
   unsigned int ret = 0;
   uint8_t *k = NULL;
   char *u = NULL;
@@ -251,7 +251,7 @@ static unsigned int
 psk_srv(SSL *ssl, const char *identity, unsigned char *psk,
         unsigned int max_psk_len)
 {
-  const tls_srv_t *srv = SSL_get_ex_data(ssl, 0);
+  const tls_srv_handshake_t *srv = SSL_get_ex_data(ssl, 0);
   unsigned int ret = 0;
   uint8_t *k = NULL;
   ssize_t l = 0;
@@ -312,24 +312,10 @@ error:
   return NULL;
 }
 
-static int
-handshake(tls_t *tls, int fd, int optname, const void *optval, socklen_t optlen)
+int
+tls_handshake(tls_t *tls, int fd, bool client, const tls_handshake_t *hs)
 {
-  bool client = optname == TLS_CLT_HANDSHAKE;
   int ret;
-
-  union {
-    const tls_clt_t *clt;
-    const tls_srv_t *srv;
-  } opt = { optval };
-
-  if (client && optlen != sizeof(tls_clt_t)) {
-    errno = EINVAL; // FIXME
-    return -1;
-  } else if (!client && optlen != sizeof(tls_srv_t)) {
-    errno = EINVAL; // FIXME
-    return -1;
-  }
 
   if (!tls->ssl) {
     tls->ssl = ssl_new(fd, client);
@@ -338,11 +324,11 @@ handshake(tls_t *tls, int fd, int optname, const void *optval, socklen_t optlen)
   }
 
   /* Prepare callbacks for the handshake. */
-  SSL_set_ex_data(tls->ssl, 0, (void *) optval);
+  SSL_set_ex_data(tls->ssl, 0, (void *) hs);
   if (client)
-    SSL_set_psk_client_callback(tls->ssl, opt.clt->psk ? psk_clt : NULL);
+    SSL_set_psk_client_callback(tls->ssl, hs->clt.psk ? psk_clt : NULL);
   else
-    SSL_set_psk_server_callback(tls->ssl, opt.srv->psk ? psk_srv : NULL);
+    SSL_set_psk_server_callback(tls->ssl, hs->srv.psk ? psk_srv : NULL);
 
   ret = SSL_do_handshake(tls->ssl);
 
@@ -357,23 +343,6 @@ handshake(tls_t *tls, int fd, int optname, const void *optval, socklen_t optlen)
     return 0;
 
   return o2e(tls, ret);
-}
-
-int
-tls_setsockopt(tls_t *tls, int fd, int optname,
-               const void *optval, socklen_t optlen)
-{
-  lock_auto_t *lock = wrlock(tls);
-
-  switch (optname) {
-  case TLS_CLT_HANDSHAKE:
-  case TLS_SRV_HANDSHAKE:
-    return handshake(tls, fd, optname, optval, optlen);
-
-  default:
-    errno = ENOPROTOOPT; // FIXME
-    return -1;
-  }
 }
 
 static long
