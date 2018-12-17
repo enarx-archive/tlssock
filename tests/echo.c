@@ -76,7 +76,7 @@ srv_cb(void *misc, const char *username, uint8_t **key)
 }
 
 static ssize_t
-clt_cb(void *misc, const char *hint, char **username, uint8_t **key)
+clt_cb(void *misc, char **username, uint8_t **key)
 {
   int *m = misc;
 

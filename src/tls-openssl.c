@@ -230,7 +230,7 @@ psk_clt(SSL *ssl, const char *hint, char *id, unsigned int imax,
   char *u = NULL;
   ssize_t l = 0;
 
-  l = hs->clt.psk(hs->clt.misc, hint, &u, &k);
+  l = hs->clt.psk(hs->clt.misc, &u, &k);
   if (l < 0)
     return 0;
 

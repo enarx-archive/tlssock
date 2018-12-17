@@ -31,7 +31,7 @@
 typedef struct {
   void *misc;
 
-  ssize_t (*psk)(void *misc, const char *hint, char **username, uint8_t **key);
+  ssize_t (*psk)(void *misc, char **username, uint8_t **key);
 } tls_clt_handshake_t;
 
 typedef struct {

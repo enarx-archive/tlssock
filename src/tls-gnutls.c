@@ -313,7 +313,7 @@ psk_clt(gnutls_session_t session, char **username, gnutls_datum_t *key)
   char *u = NULL;
   ssize_t l = 0;
 
-  l = hs->clt.psk(hs->clt.misc, gnutls_psk_client_get_hint(session), &u, &k);
+  l = hs->clt.psk(hs->clt.misc, &u, &k);
   if (l < 0)
     return -1;
 
