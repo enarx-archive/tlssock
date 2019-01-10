@@ -7,8 +7,8 @@ digraph Workflow {
     edge [style=invis];
     label=Info;
 
-    "getsockopt(SELF_NAME)" -> "getsockopt(SELF_CERT)";
-    "getsockopt(PEER_NAME)" -> "getsockopt(PEER_CERT)";
+    "getsockopt(TLS_SELF_NAME)" -> "getsockopt(TLS_SELF_CERT)";
+    "getsockopt(TLS_PEER_NAME)" -> "getsockopt(TLS_PEER_CERT)";
   }
 
   subgraph cluster_io {
@@ -24,65 +24,26 @@ digraph Workflow {
   subgraph cluster_srv {
     label=Server;
 
-    srv_bind [label="bind()"];
-    srv_self_cert [label="setsockopt(SELF_CERT)"];
-    srv_peer_name [label="setsockopt(PEER_NAME)",style="rounded,filled"];
-    srv_peer_cert [label="setsockopt(PEER_CERT)",style="rounded,filled"];
-    srv_root_cert [label="setsockopt(ROOT_CERT)",style="rounded,filled"];
-
-    srv_bind -> "listen()";
+    "bind()" -> "listen()";
 
     "listen()" -> "accept()";
     "accept()" -> "accept()" [label=" main loop "];
-    "accept()" -> srv_self_cert [label=" new connection "];
-
-    "listen()" -> "accept4()";
-    "accept4()" -> "accept4()" [label=" main loop "];
-    "accept4()" -> srv_self_cert [label=" new connection "];
-
-    srv_self_cert -> srv_self_cert [label=" SNI ", style=dashed];
-
-    srv_self_cert -> srv_peer_name;
-    srv_self_cert -> srv_peer_cert;
-    srv_self_cert -> srv_root_cert;
-
-    srv_peer_name -> srv_root_cert;
-    srv_root_cert -> srv_peer_name;
-
-    srv_root_cert -> srv_root_cert;
+    "accept()" -> "setsockopt(TLS_SRV_HANDSHAKE)" [label=" new connection "];
   }
 
   subgraph cluster_clt {
     label=Client;
 
-    clt_bind [label="bind()",style="rounded,filled"];
-    clt_peer_name [label="setsockopt(PEER_NAME)"];
-    clt_peer_cert [label="setsockopt(PEER_CERT)"];
-    clt_self_cert [label="setsockopt(SELF_CERT)",style="rounded,filled"];
-    clt_root_cert [label="setsockopt(ROOT_CERT)",style="rounded,filled"];
-
-    clt_bind -> "connect()";
-    "connect()" -> clt_peer_cert;
-    clt_peer_cert -> clt_self_cert;
-
-    "connect()" -> clt_peer_name;
-    clt_peer_name -> clt_root_cert;
-    clt_peer_name -> clt_self_cert;
-    clt_root_cert -> clt_self_cert;
-
-    clt_root_cert -> clt_root_cert;
+    "connect()" -> "setsockopt(TLS_CLT_HANDSHAKE)";
   }
 
-  "socket(PROT_TLS)" -> srv_bind;
-  "socket(PROT_TLS)" -> clt_bind;
+  "socket(AF_INET, SOCK_STREAM, IPPROTO_TLS)" -> "bind()";
+  "socket(AF_INET, SOCK_STREAM, IPPROTO_TLS)" -> "connect()";
 
-  srv_self_cert -> "setsockopt(HANDSHAKE)" [ltail=cluster_srv];
-  clt_self_cert -> "setsockopt(HANDSHAKE)" [ltail=cluster_clt];
+  "setsockopt(TLS_SRV_HANDSHAKE)" -> "recv()" [lhead=cluster_io];
+  "setsockopt(TLS_CLT_HANDSHAKE)" -> "send()" [lhead=cluster_io];
 
+  "write()" -> "getsockopt(TLS_SELF_NAME)" [ltail=cluster_io,lhead=cluster_info];
 
-  "setsockopt(HANDSHAKE)" -> "write()" [lhead=cluster_io];
-
-  "write()" -> "getsockopt(SELF_NAME)" [ltail=cluster_io,lhead=cluster_info];
-
-  "getsockopt(SELF_CERT)" -> "close()" [ltail=cluster_info];
+  "getsockopt(TLS_SELF_CERT)" -> "close()" [ltail=cluster_info];
 }
