@@ -48,16 +48,6 @@ assert(variants.length() > 0, 'At least one TLS library is required!')
 
 install_headers('src/tlssock.h')
 
-core = [
-  'src/tlssock.c',
-  'src/tlssock.h',
-  'src/core.c',
-  'src/core.h',
-  'src/idx.c',
-  'src/idx.h',
-  'src/tls.h',
-]
-
 foreach v: variants
   if not v.found()
     continue
@@ -65,8 +55,12 @@ foreach v: variants
 
   name = v.name()
 
-  lib = shared_library('tlssock-' + name,
-    core + ['src/tls-' + name + '.c'],
+  lib = shared_library('tlssock-' + name, [
+      'src/tlssock.c', 'src/tlssock.h',
+      'src/core.c', 'src/core.h',
+      'src/idx.c', 'src/idx.h',
+      'src/tls.h', 'src/tls-' + name + '.c',
+    ],
     dependencies: [v, threads, dl],
     install: true,
   )
