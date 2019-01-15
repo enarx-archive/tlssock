@@ -149,13 +149,13 @@ main(int argc, char *argv[])
   for (int c; (c = getopt_long(argc, argv, sopts, lopts, NULL)) >= 0; ) {
     switch (c) {
     case 'T':
-      if (inet_pton(AF_INET, optarg, &addr.in.sin_addr) == 0) {
+      if (inet_pton(AF_INET, optarg, &addr.in.sin_addr) == 1) {
         addr.in.sin_port = htons(rand() % (INT16_MAX - 1024) + 1024);
         addr.in.sin_family = AF_INET;
         break;
       }
 
-      if (inet_pton(AF_INET6, optarg, &addr.in6.sin6_addr) == 0) {
+      if (inet_pton(AF_INET6, optarg, &addr.in6.sin6_addr) == 1) {
         addr.in6.sin6_port = htons(rand() % (INT16_MAX - 1024) + 1024);
         addr.in6.sin6_family = AF_INET6;
         break;
