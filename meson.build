@@ -46,7 +46,7 @@ threads = dependency('threads')
 variants = [ openssl, gnutls ]
 assert(variants.length() > 0, 'At least one TLS library is required!')
 
-install_headers('src/tlssock.h')
+install_headers('lib/tlssock.h')
 
 foreach v: variants
   if not v.found()
@@ -56,10 +56,10 @@ foreach v: variants
   name = v.name()
 
   lib = shared_library('tlssock-' + name, [
-      'src/tlssock.c', 'src/tlssock.h',
-      'src/core.c', 'src/core.h',
-      'src/idx.c', 'src/idx.h',
-      'src/tls.h', 'src/tls-' + name + '.c',
+      'lib/tlssock.c', 'lib/tlssock.h',
+      'lib/core.c', 'lib/core.h',
+      'lib/idx.c', 'lib/idx.h',
+      'lib/tls.h', 'lib/tls-' + name + '.c',
     ],
     dependencies: [v, threads, dl],
     install: true,
