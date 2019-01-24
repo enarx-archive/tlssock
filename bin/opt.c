@@ -55,7 +55,7 @@ static const struct {
   {'l', "Bind and listen for an incoming connection"},
   {'h', "Display this help message"},
   {'u', "Use UDP (or DTLS) instead of default (TCP [TLS])"},
-  {'b', "User blocking sockets (internally)"},
+  {'b', "Use blocking sockets (internally)"},
   {'T', "Use TLS or DTLS instead of TCP or UDP"},
   {'U', "Pre-Shared Key authentication username", "NAME"},
   {'K', "Pre-Shared Key authentication key (hex)", "HEX"},
