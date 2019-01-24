@@ -60,40 +60,42 @@ ncat = find_program('ncat', required: false)
 cat = find_program('cat').path()
 
 psk = '7df28f5439b5a051cc138b6e12128264'
-foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
+foreach n: ['4', '6']
+  h = 'localhost' + n
+
   if ncat.found()
-    tests += [[i, 'TCP', 'clt', 'ncat', false, [
-      ncat.path(), a, '%PORT%'
+    tests += [[n, 'TCP', 'clt', 'ncat', false, [
+      ncat.path(), h, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'esrv', 'ncat', false, [
-      ncat.path(), '-e', cat, '-l', a, '%PORT%'
+    tests += [[n, 'TCP', 'esrv', 'ncat', false, [
+      ncat.path(), '-e', cat, '-l', h, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'rsrv', 'ncat', false,[
-      ncat.path(), '-e', rev.full_path(), '-l', a, '%PORT%'
+    tests += [[n, 'TCP', 'rsrv', 'ncat', false,[
+      ncat.path(), '-e', rev.full_path(), '-l', h, '%PORT%'
     ]]]
   endif
 
   if socat.found()
-    tests += [[i, 'TCP', 'clt', 'socat', false, [
-      socat.path(), 'stdio', 'tcp:localhost:%PORT%,pf=' + i
+    tests += [[n, 'TCP', 'clt', 'socat', false, [
+      socat.path(), 'stdio', 'tcp:' + h + ':%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'esrv', 'socat', false, [
-      socat.path(), 'tcp-listen:%PORT%,pf=' + i, 'exec:' + cat
+    tests += [[n, 'TCP', 'esrv', 'socat', false, [
+      socat.path(), 'tcp-listen:%PORT%,pf=ipv' + n, 'exec:' + cat
     ]]]
-    tests += [[i, 'TCP', 'rsrv', 'socat', false, [
-      socat.path(), 'tcp-listen:%PORT%,pf=' + i, 'exec:' + rev.full_path()
+    tests += [[n, 'TCP', 'rsrv', 'socat', false, [
+      socat.path(), 'tcp-listen:%PORT%,pf=ipv' + n, 'exec:' + rev.full_path()
     ]]]
   endif
 
   if gnuclt.found()
-    tests += [[i, 'PSK', 'clt', 'gnutls-cli', false, [
+    tests += [[n, 'PSK', 'clt', 'gnutls-cli', false, [
       gnuclt.path(), '-p', '%PORT%', '--pskusername=foo', '--pskkey=' + psk,
-                     '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK', a
+                     '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK', h
     ]]]
   endif
 
   if gnusrv.found()
-    tests += [[i, 'PSK', 'esrv', 'gnutls-serv', true, [
+    tests += [[n, 'PSK', 'esrv', 'gnutls-serv', true, [
       gnusrv.path(), '-p', '%PORT%', '--echo',
         '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK',
         '--pskpasswd=' + meson.current_source_dir() + '/tests/psk.txt'
@@ -101,13 +103,13 @@ foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
   endif
 
   if sslcli.found()
-    tests += [[i, 'PSK', 'clt', 'openssl', true, [
-      sslcli.path(), 's_client', '-connect', '[' + a + ']:%PORT%', '-quiet',
+    tests += [[n, 'PSK', 'clt', 'openssl', true, [
+      sslcli.path(), 's_client', '-connect', h + ':%PORT%', '-quiet',
         '-psk_identity', 'foo', '-psk', psk
     ]]]
-    tests += [[i, 'PSK', 'rsrv', 'openssl', true, [
+    tests += [[n, 'PSK', 'rsrv', 'openssl', true, [
       sslcli.path(), 's_server', '-nocert', '-rev', '-psk_identity', 'foo',
-        '-accept', '[' + a + ']:%PORT%', '-psk', psk
+        '-accept', h + ':%PORT%', '-psk', psk
     ]]]
   endif
 endforeach
@@ -145,35 +147,37 @@ foreach v: variants
     link_with: lib
   )
 
-  foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
-    tests += [[i, 'TCP', 'clt', 'ts-' + v.name(), false, [
-      tlssock, a, '%PORT%'
+  foreach n: ['4', '6']
+    h = 'localhost' + n
+
+    tests += [[n, 'TCP', 'clt', 'ts-' + v.name(), false, [
+      tlssock, h, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'esrv', 'ts-' + v.name(), false, [
-      tlssock, '-e', cat, '-l', a, '%PORT%'
+    tests += [[n, 'TCP', 'esrv', 'ts-' + v.name(), false, [
+      tlssock, '-e', cat, '-l', h, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'rsrv', 'ts-' + v.name(), false, [
-      tlssock, '-e', rev.full_path(), '-l', a, '%PORT%'
+    tests += [[n, 'TCP', 'rsrv', 'ts-' + v.name(), false, [
+      tlssock, '-e', rev.full_path(), '-l', h, '%PORT%'
     ]]]
 
-    tests += [[i, 'PSK', 'clt', 'ts-' + v.name(), false, [
-      tlssock, '-T', '-U', 'foo', '-K', psk, a, '%PORT%'
+    tests += [[n, 'PSK', 'clt', 'ts-' + v.name(), false, [
+      tlssock, '-T', '-U', 'foo', '-K', psk, h, '%PORT%'
     ]]]
-    tests += [[i, 'PSK', 'esrv', 'ts-' + v.name(), false, [
-      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', cat, a, '%PORT%'
+    tests += [[n, 'PSK', 'esrv', 'ts-' + v.name(), false, [
+      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', cat, h, '%PORT%'
     ]]]
-    tests += [[i, 'PSK', 'rsrv', 'ts-' + v.name(), false, [
-      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', rev.full_path(), a, '%PORT%'
+    tests += [[n, 'PSK', 'rsrv', 'ts-' + v.name(), false, [
+      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', rev.full_path(), h, '%PORT%'
     ]]]
   endforeach
 endforeach
 
-foreach i: ['4', '6']
+foreach n: ['4', '6']
   foreach p: ['TCP', 'PSK']
     foreach c: tests
-      if c[0] == 'IPv' + i and c[1] == p and c[2] == 'clt'
+      if c[0] == n and c[1] == p and c[2] == 'clt'
         foreach s: tests
-          if s[0] == 'IPv' + i and s[1] == p and (s[2] == 'esrv' or s[2] == 'rsrv')
+          if s[0] == n and s[1] == p and (s[2] == 'esrv' or s[2] == 'rsrv')
             args = ['--', c[5], '--', s[5]]
 
             if s[2] == 'rsrv'
@@ -190,7 +194,7 @@ foreach i: ['4', '6']
 
             sep = s[2] == 'rsrv' ? ' => ' : ' -> '
 
-            test(i + p + ': ' + c[3] + sep + s[3], run, args: args)
+            test(n + p + ': ' + c[3] + sep + s[3], run, args: args)
           endif
         endforeach
       endif
