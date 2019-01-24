@@ -56,18 +56,18 @@ gnusrv = find_program('gnutls-serv', required: false)
 gnuclt = find_program('gnutls-cli', required: false)
 sslcli = find_program('openssl', required: false)
 socat = find_program('socat', required: false)
-nc = find_program('nc', required: false)
+ncat = find_program('ncat', required: false)
 cat = find_program('cat').path()
 foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
-  if nc.found()
-    tests += [[i, 'TCP', 'clt', 'nc', false, [
-      nc.path(), a, '%PORT%'
+  if ncat.found()
+    tests += [[i, 'TCP', 'clt', 'ncat', false, [
+      ncat.path(), a, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'esrv', 'nc', false, [
-      nc.path(), '-e', cat, '-l', a, '%PORT%'
+    tests += [[i, 'TCP', 'esrv', 'ncat', false, [
+      ncat.path(), '-e', cat, '-l', a, '%PORT%'
     ]]]
-    tests += [[i, 'TCP', 'rsrv', 'nc', false,[
-      nc.path(), '-e', rev.full_path(), '-l', a, '%PORT%'
+    tests += [[i, 'TCP', 'rsrv', 'ncat', false,[
+      ncat.path(), '-e', rev.full_path(), '-l', a, '%PORT%'
     ]]]
   endif
 
