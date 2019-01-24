@@ -1,3 +1,6 @@
+[![Build Status](https://travis-ci.org/enarx/tlssock.svg?branch=master)](https://travis-ci.org/enarx/tlssock)
+[![Code Coverage](https://codecov.io/gh/enarx/tlssock/branch/master/graph/badge.svg)](https://codecov.io/gh/enarx/tlssock)
+
 # TLSSock
 
 Welcome to TLSSock!
