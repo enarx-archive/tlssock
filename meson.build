@@ -58,6 +58,8 @@ sslcli = find_program('openssl', required: false)
 socat = find_program('socat', required: false)
 ncat = find_program('ncat', required: false)
 cat = find_program('cat').path()
+
+psk = '7df28f5439b5a051cc138b6e12128264'
 foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
   if ncat.found()
     tests += [[i, 'TCP', 'clt', 'ncat', false, [
@@ -85,8 +87,8 @@ foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
 
   if gnuclt.found()
     tests += [[i, 'PSK', 'clt', 'gnutls-cli', false, [
-      gnuclt.path(), '-p', '%PORT%', '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK',
-                     '--pskusername=foo', '--pskkey=7df28f5439b5a051cc138b6e12128264', a
+      gnuclt.path(), '-p', '%PORT%', '--pskusername=foo', '--pskkey=' + psk,
+                     '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK', a
     ]]]
   endif
 
@@ -101,11 +103,11 @@ foreach i, a: { 'IPv4': '127.0.0.1', 'IPv6': '::1' }
   if sslcli.found()
     tests += [[i, 'PSK', 'clt', 'openssl', true, [
       sslcli.path(), 's_client', '-connect', '[' + a + ']:%PORT%', '-quiet',
-        '-psk_identity', 'foo', '-psk', '7df28f5439b5a051cc138b6e12128264'
+        '-psk_identity', 'foo', '-psk', psk
     ]]]
     tests += [[i, 'PSK', 'rsrv', 'openssl', true, [
       sslcli.path(), 's_server', '-nocert', '-rev', '-psk_identity', 'foo',
-        '-accept', '[' + a + ']:%PORT%', '-psk', '7df28f5439b5a051cc138b6e12128264'
+        '-accept', '[' + a + ']:%PORT%', '-psk', psk
     ]]]
   endif
 endforeach
@@ -155,16 +157,13 @@ foreach v: variants
     ]]]
 
     tests += [[i, 'PSK', 'clt', 'ts-' + v.name(), false, [
-      tlssock, '-T', '-U', 'foo', '-K', '7df28f5439b5a051cc138b6e12128264',
-               a, '%PORT%'
+      tlssock, '-T', '-U', 'foo', '-K', psk, a, '%PORT%'
     ]]]
     tests += [[i, 'PSK', 'esrv', 'ts-' + v.name(), false, [
-      tlssock, '-T', '-U', 'foo', '-K', '7df28f5439b5a051cc138b6e12128264',
-               '-e', cat, '-l', a, '%PORT%'
+      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', cat, a, '%PORT%'
     ]]]
     tests += [[i, 'PSK', 'rsrv', 'ts-' + v.name(), false, [
-      tlssock, '-T', '-U', 'foo', '-K', '7df28f5439b5a051cc138b6e12128264',
-               '-e', rev.full_path(), '-l', a, '%PORT%'
+      tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', rev.full_path(), a, '%PORT%'
     ]]]
   endforeach
 endforeach
