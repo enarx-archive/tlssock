@@ -24,5 +24,4 @@ fi
 ninja=`findexe ninja ninja-build`
 "$ninja" test
 
-bash <(curl -s https://codecov.io/bash) 2>&1 \
-  | egrep -v "has arcs (to entry|from exit) block"
+curl -s https://codecov.io/bash | sed 's|execdir|exec|' | bash -s
