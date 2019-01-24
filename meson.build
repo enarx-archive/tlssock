@@ -87,7 +87,7 @@ foreach n: ['4', '6']
     ]]]
   endif
 
-  if gnuclt.found()
+  if gnuclt.found() and false
     tests += [[n, 'PSK', 'clt', 'gnutls-cli', false, [
       gnuclt.path(), '-p', '%PORT%', '--pskusername=foo', '--pskkey=' + psk,
                      '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK', h
