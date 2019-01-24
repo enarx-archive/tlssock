@@ -24,4 +24,4 @@ fi
 ninja=`findexe ninja ninja-build`
 "$ninja" test
 
-curl -s https://codecov.io/bash | sed 's|execdir|exec|' | bash -s
+curl -s https://codecov.io/bash | sed 's|execdir|exec|' | bash -s -- -a -r
