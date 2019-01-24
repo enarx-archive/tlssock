@@ -23,8 +23,10 @@ case "$DISTRO" in
         sleep 2
     done
 
-    while ! apt-get -y install $CC meson git \
-        build-essential pkg-config libssl-dev libgnutls28-dev gnutls-bin socat ncat; do
+    while ! apt-get -y install build-essential $CC meson git pkg-config \
+        libssl-dev openssl \
+        libgnutls28-dev gnutls-bin \
+        ncat socat curl; do
         sleep 2
     done
     ;;
@@ -32,6 +34,9 @@ case "$DISTRO" in
   fedora:*)
     dnf -y clean all
     dnf -y --setopt=deltarpm=0 update
-    dnf -y install $CC meson git pkgconfig openssl-devel gnutls-devel
+    dnf -y install $CC meson git $CC pkgconfig findutils \
+	    openssl-devel openssl \
+	    gnutls-devel gnutls-utils \
+	    nmap-ncat socat curl
     ;;
 esac
