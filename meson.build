@@ -63,6 +63,11 @@ psk = '7df28f5439b5a051cc138b6e12128264'
 foreach n: ['4', '6']
   h = 'localhost' + n
 
+  r = run_command('grep', h, '/etc/hosts')
+  if r.returncode() != 0
+    error('Failed to find localhost4/localhost6 in /etc/hosts!')
+  endif
+
   if ncat.found()
     tests += [[n, 'TCP', 'clt', 'ncat', false, [
       ncat.path(), h, '%PORT%'
