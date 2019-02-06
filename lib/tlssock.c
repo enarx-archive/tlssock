@@ -204,48 +204,6 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
 }
 
 ssize_t
-pread(int fd, void *buf, size_t count, off_t offset)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(pread)(fd, buf, count, offset);
-}
-
-ssize_t
-preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(preadv)(fd, iov, iovcnt, offset);
-}
-
-ssize_t
-preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(preadv2)(fd, iov, iovcnt, offset, flags);
-}
-
-ssize_t
-pwrite(int fd, const void *buf, size_t count, off_t offset)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(pwrite)(fd, buf, count, offset);
-}
-
-ssize_t
-pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(pwritev)(fd, iov, iovcnt, offset);
-}
-
-ssize_t
-pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags)
-{
-  return is_tls(fd, ENOSYS) ? -1 : // TODO
-    NEXT(pwritev2)(fd, iov, iovcnt, offset, flags);
-}
-
-ssize_t
 read(int fd, void *buf, size_t count)
 {
   tls_auto_t *tls = NULL;
