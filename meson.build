@@ -128,6 +128,7 @@ foreach v: variants
       'lib/tlssock.c', 'lib/tlssock.h',
       'lib/core.c', 'lib/core.h',
       'lib/idx.c', 'lib/idx.h',
+      'lib/locks.c', 'lib/locks.h',
       'lib/tls.h', 'lib/tls-' + v.name() + '.c',
     ],
     dependencies: [v, threads, dl],
