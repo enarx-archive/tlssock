@@ -20,11 +20,11 @@
  */
 
 #include "core.h"
+#include "locks.h"
 #include "tls.h"
 #include "tlssock.h"
 
 #include <gnutls/gnutls.h>
-#include <pthread.h>
 
 #include <sys/uio.h>
 #include <sys/types.h>
@@ -39,14 +39,8 @@
 #include <fcntl.h>
 #include <poll.h>
 
-#define lock_auto_t lock_t __attribute__((cleanup(lock_cleanup)))
-
-typedef struct {
-  pthread_rwlock_t lock;
-} lock_t;
-
 struct tls {
-  lock_t lock;
+  rwlock_t lock;
   size_t ref;
 
   gnutls_session_t session;
@@ -96,49 +90,6 @@ g2e(int ret)
   }
 }
 
-static void
-lock_cleanup(lock_t **lock)
-{
-  if (lock && *lock) {
-    pthread_rwlock_unlock(&(*lock)->lock);
-    *lock = NULL;
-  }
-}
-
-static lock_t *
-rdlock(tls_t *tls)
-{
-  int ret;
-
-  if (!tls)
-    return NULL;
-
-  ret = pthread_rwlock_rdlock(&tls->lock.lock);
-  if (ret != 0) {
-    errno = ret;
-    return NULL;
-  }
-
-  return &tls->lock;
-}
-
-static lock_t *
-wrlock(tls_t *tls)
-{
-  int ret;
-
-  if (!tls)
-    return NULL;
-
-  ret = pthread_rwlock_wrlock(&tls->lock.lock);
-  if (ret != 0) {
-    errno = ret;
-    return NULL;
-  }
-
-  return &tls->lock;
-}
-
 tls_t *
 tls_new(void)
 {
@@ -149,7 +100,7 @@ tls_new(void)
   if (!tls)
     return NULL;
 
-  ret = pthread_rwlock_init(&tls->lock.lock, NULL);
+  ret = rwlock_init(&tls->lock);
   if (ret != 0) {
     free(tls);
     errno = ret;
@@ -170,8 +121,10 @@ tls_cleanup(tls_t **tls)
 tls_t *
 tls_incref(tls_t *tls)
 {
+  if (!tls)
+    return NULL;
   {
-    lock_auto_t *lock = wrlock(tls);
+    rwlock_auto_t *lock = rw_wrlock(&tls->lock);
 
     if (!lock)
       return NULL;
@@ -213,8 +166,10 @@ tls_clear(tls_t *tls)
 tls_t *
 tls_decref(tls_t *tls)
 {
+  if (!tls)
+    return NULL;
   {
-    lock_auto_t *lock = wrlock(tls);
+    rwlock_auto_t *lock = rw_wrlock(&tls->lock);
 
     if (!lock)
       return NULL;
@@ -225,7 +180,7 @@ tls_decref(tls_t *tls)
     tls_clear(tls);
   }
 
-  pthread_rwlock_destroy(&tls->lock.lock);
+  rwlock_destroy(&tls->lock);
   memset(tls, 0, sizeof(*tls));
   return NULL;
 }
@@ -233,14 +188,14 @@ tls_decref(tls_t *tls)
 ssize_t
 tls_read(tls_t *tls, int fd, void *buf, size_t count)
 {
-  lock_auto_t *lock = rdlock(tls);
+  rwlock_auto_t *lock = rw_rdlock(&tls->lock);
   return g2e(gnutls_record_recv(tls->session, buf, count));
 }
 
 ssize_t
 tls_write(tls_t *tls, int fd, const void *buf, size_t count)
 {
-  lock_auto_t *lock = rdlock(tls);
+  rwlock_auto_t *lock = rw_rdlock(&tls->lock);
   return g2e(gnutls_record_send(tls->session, buf, count));
 }
 
