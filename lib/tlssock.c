@@ -33,7 +33,7 @@ is_tls(int fd, int errnum)
 {
   tls_auto_t *tls = NULL;
   tls = idx_get(fd);
-  if (tls && errnum != 0)
+  if (!tls && errnum != 0)
     errno = errnum;
   return tls;
 }
