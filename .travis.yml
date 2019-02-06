@@ -25,7 +25,6 @@ services: docker
 env:
   matrix:
     - DISTRO=debian:unstable
-    - DISTRO=debian:testing
     - DISTRO=fedora:rawhide
     - DISTRO=ubuntu:devel
 
