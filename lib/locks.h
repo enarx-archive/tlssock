@@ -21,45 +21,45 @@
 
 #pragma once
 
-#include <pthread.h>
+#define rwhold_auto_t rwhold_t __attribute__((cleanup(rwhold_release)))
+#define hold_auto_t hold_t __attribute__((cleanup(hold_release)))
 
 /* Common infrastructure for scope-based locking. */
 
 /* First, rwlocks! */
 
-typedef struct {
-  pthread_rwlock_t lock;
-} rwlock_t;
-
-int
-rwlock_init(rwlock_t *lock);
-
-void
-rwlock_cleanup(rwlock_t **lock);
-
-void
-rwlock_destroy(rwlock_t *lock);
+typedef struct rwlock rwlock_t;
+typedef struct rwhold rwhold_t;
 
 rwlock_t *
-rw_rdlock(rwlock_t *tls);
+rwlock_init(void);
 
-rwlock_t *
-rw_wrlock(rwlock_t *tls);
+void
+rwlock_free(rwlock_t *lock);
 
-#define rwlock_auto_t rwlock_t __attribute__((cleanup(rwlock_cleanup)))
+rwhold_t *
+rwlock_rdlock(rwlock_t *lock);
+
+rwhold_t *
+rwlock_wrlock(rwlock_t *lock);
+
+void
+rwhold_release(rwhold_t **hold);
 
 /* Then mutexes! */
 
-typedef struct {
-  pthread_mutex_t lock;
-} mutex_t;
+typedef struct mutex mutex_t;
+typedef struct hold hold_t;
 
-int mutex_init(mutex_t *lock);
+mutex_t *
+mutex_init(void);
 
-void mutex_cleanup(mutex_t **lock);
+void
+mutex_free(mutex_t *lock);
 
-void mutex_destroy(mutex_t *lock);
+hold_t *
+mutex_lock(mutex_t *lock);
 
-mutex_t *mutex_lock(mutex_t *lock);
+void
+hold_release(hold_t **hold);
 
-#define mutex_auto_t mutex_t __attribute__((cleanup(mutex_cleanup)))

@@ -22,34 +22,38 @@
 #include "locks.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <pthread.h>
 
-int
-rwlock_init(rwlock_t *lock)
-{
-  return pthread_rwlock_init(&lock->lock, NULL);
-}
+struct rwhold {
+  pthread_rwlock_t lock;
+};
 
-void
-rwlock_cleanup(rwlock_t **lock)
-{
-  if (lock && *lock) {
-    pthread_rwlock_unlock(&(*lock)->lock);
-    *lock = NULL;
-  }
-}
+struct rwlock {
+  rwhold_t hold;
+};
 
-void
-rwlock_destroy(rwlock_t *lock)
-{
-  pthread_rwlock_destroy(&lock->lock);
-}
+struct hold {
+  pthread_mutex_t lock;
+};
+
+struct mutex {
+  hold_t hold;
+};
 
 rwlock_t *
-rw_rdlock(rwlock_t *lock)
+rwlock_init(void)
 {
-  int ret = pthread_rwlock_rdlock(&lock->lock);
+  rwlock_t *lock = NULL;
+  int ret = 0;
+
+  lock = malloc(sizeof(*lock));
+  if (!lock)
+    return NULL;
+
+  ret = pthread_rwlock_init(&lock->hold.lock, NULL);
   if (ret != 0) {
+    free(lock);
     errno = ret;
     return NULL;
   }
@@ -57,46 +61,106 @@ rw_rdlock(rwlock_t *lock)
   return lock;
 }
 
-rwlock_t *
-rw_wrlock(rwlock_t *lock)
-{
-  int ret = pthread_rwlock_wrlock(&lock->lock);
-  if (ret != 0) {
-    errno = ret;
-    return NULL;
-  }
-
-  return lock;
-}
-
-int
-mutex_init(mutex_t *lock)
-{
-  return pthread_mutex_init(&lock->lock, NULL);
-}
-
 void
-mutex_cleanup(mutex_t **lock)
+rwlock_free(rwlock_t *lock)
 {
-  if (!lock || !*lock)
+  if (!lock)
     return;
-  pthread_mutex_unlock(&(*lock)->lock);
-  *lock = NULL;
+
+  pthread_rwlock_destroy(&lock->hold.lock);
+  free(lock);
+}
+
+rwhold_t *
+rwlock_rdlock(rwlock_t *lock)
+{
+  if (!lock)
+    return NULL;
+
+  int ret = pthread_rwlock_rdlock(&lock->hold.lock);
+  if (ret != 0) {
+    errno = ret;
+    return NULL;
+  }
+
+  return &lock->hold;
+}
+
+rwhold_t *
+rwlock_wrlock(rwlock_t *lock)
+{
+  if (!lock)
+    return NULL;
+
+  int ret = pthread_rwlock_wrlock(&lock->hold.lock);
+  if (ret != 0) {
+    errno = ret;
+    return NULL;
+  }
+
+  return &lock->hold;
 }
 
 void
-mutex_destroy(mutex_t *lock)
+rwhold_release(rwhold_t **hold)
 {
-  pthread_mutex_destroy(&lock->lock);
+  if (hold && *hold) {
+    pthread_rwlock_unlock(&(*hold)->lock);
+    *hold = NULL;
+  }
 }
 
 mutex_t *
-mutex_lock(mutex_t *lock)
+mutex_init(void)
 {
-  int ret = pthread_mutex_lock(&lock->lock);
-  if (ret) {
+  mutex_t *lock = NULL;
+  int ret = 0;
+
+  lock = malloc(sizeof(*lock));
+  if (!lock)
+    return NULL;
+
+  ret = pthread_mutex_init(&lock->hold.lock, NULL);
+  if (ret != 0) {
+    free(lock);
     errno = ret;
     return NULL;
   }
+
   return lock;
 }
+
+void
+mutex_free(mutex_t *lock)
+{
+  if (!lock)
+    return;
+
+  pthread_mutex_destroy(&lock->hold.lock);
+  free(lock);
+}
+
+hold_t *
+mutex_lock(mutex_t *lock)
+{
+  if (!lock)
+    return NULL;
+
+  int ret = pthread_mutex_lock(&lock->hold.lock);
+  if (ret != 0) {
+    errno = ret;
+    return NULL;
+  }
+
+  return &lock->hold;
+}
+
+void
+hold_release(hold_t **hold)
+{
+  if (hold && *hold) {
+    pthread_mutex_unlock(&(*hold)->lock);
+    *hold = NULL;
+  }
+}
+

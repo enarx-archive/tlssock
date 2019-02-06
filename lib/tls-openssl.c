@@ -43,7 +43,7 @@ static BIO_METHOD *stream = NULL;
 static BIO_METHOD *dgram = NULL;
 
 struct tls {
-  rwlock_t lock;
+  rwlock_t *lock;
   size_t ref;
 
   SSL *ssl;
@@ -77,16 +77,14 @@ tls_t *
 tls_new(void)
 {
   tls_t *tls = NULL;
-  int ret;
 
   tls = calloc(1, sizeof(*tls));
   if (!tls)
     return NULL;
 
-  ret = rwlock_init(&tls->lock);
-  if (ret != 0) {
+  tls->lock = rwlock_init();
+  if (!tls->lock) {
     free(tls);
-    errno = ret;
     return NULL;
   }
 
@@ -107,8 +105,8 @@ tls_incref(tls_t *tls)
   if (!tls)
     return NULL;
   {
-    rwlock_auto_t *lock = rw_wrlock(&tls->lock);
-    if (!lock)
+    rwhold_auto_t *hold = rwlock_wrlock(tls->lock);
+    if (!hold)
       return NULL;
 
     tls->ref++;
@@ -123,8 +121,8 @@ tls_decref(tls_t *tls)
   if (!tls)
     return NULL;
   {
-    rwlock_auto_t *lock = rw_wrlock(&tls->lock);
-    if (!lock)
+    rwhold_auto_t *hold = rwlock_wrlock(tls->lock);
+    if (!hold)
       return NULL;
 
     if (tls->ref-- > 1)
@@ -133,7 +131,7 @@ tls_decref(tls_t *tls)
     SSL_free(tls->ssl);
   }
 
-  rwlock_destroy(&tls->lock);
+  rwlock_free(tls->lock);
   memset(tls, 0, sizeof(*tls));
   free(tls);
   return NULL;
@@ -142,7 +140,7 @@ tls_decref(tls_t *tls)
 ssize_t
 tls_read(tls_t *tls, int fd, void *buf, size_t count)
 {
-  rwlock_auto_t *lock = rw_rdlock(&tls->lock);
+  rwhold_auto_t *hold = rwlock_rdlock(tls->lock);
   size_t bytes = 0;
   int ret;
 
@@ -156,7 +154,7 @@ tls_read(tls_t *tls, int fd, void *buf, size_t count)
 ssize_t
 tls_write(tls_t *tls, int fd, const void *buf, size_t count)
 {
-  rwlock_auto_t *lock = rw_rdlock(&tls->lock);
+  rwhold_auto_t *hold = rwlock_rdlock(tls->lock);
   size_t bytes = 0;
   int ret;
 
