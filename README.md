@@ -24,3 +24,14 @@ TLS connection on either the server-side or the client-side. Grey function calls
 are optional and will depend on your application's needs.
 
 ![Workflow](https://g.gravizo.com/source/svg?https%3A%2F%2Fraw.githubusercontent.com%2Fenarx%2Ftlssock%2Fmaster%2Fworkflow.dot)
+
+```flow
+st=>start: Start
+op=>operation: Your Operation
+cond=>condition: Yes or No?
+e=>end
+
+st->op->cond
+cond(yes)->e
+cond(no)->op
+```
