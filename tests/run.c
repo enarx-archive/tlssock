@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 
 #define pid_auto_t pid_t __attribute__((cleanup(pid_cleanup)))
 #define fd_auto_t fd_t __attribute__((cleanup(fd_cleanup)))
@@ -189,7 +190,7 @@ int
 main(int argc, char *argv[])
 {
   char msg[] = "abcdefgh\n";
-
+  struct timespec tms;
   char buf[1024];
   uint16_t port;
 
@@ -209,7 +210,8 @@ main(int argc, char *argv[])
   bool skill = false;
   bool rev = false;
 
-  srand(getpid());
+  clock_gettime(CLOCK_REALTIME, &tms);
+  srand(getpid() + tms.tv_nsec);
   port = 1024 + rand() % 64511;
 
   memset(buf, 0, sizeof(buf));
