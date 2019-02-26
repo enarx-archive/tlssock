@@ -6,7 +6,7 @@
 Welcome to TLSSock!
 
 TLSSock is a library which wraps the POSIX networking APIs
-in order to provide TLS and DTLS connecivity without invasive application
+in order to provide TLS and DTLS connectivity without invasive application
 restructuring. For example, you can write your application using normal TCP/IP
 sockets and then, with a few #ifdefs, convert your application to use TLS.
 
