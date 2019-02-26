@@ -54,7 +54,7 @@ o2e(tls_t *tls, int ret)
 {
   switch (SSL_get_error(tls->ssl, ret)) {
   case SSL_ERROR_WANT_CONNECT:
-  //case SSL_ERROR_ZERO_RETURN:
+  case SSL_ERROR_ZERO_RETURN:
   case SSL_ERROR_WANT_ACCEPT:
     errno = ENOTCONN; // FIXME
     return -1;
