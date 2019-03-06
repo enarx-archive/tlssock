@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "../lib/tlssock.h"
 #include "opt.h"
 #include "hex.h"
 
@@ -26,8 +27,19 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *sopts = "46hlknubTc:e:U:K:";
+typedef enum {
+  OPT_CERT = 1,
+  OPT_CERT_KEY = 2,
+  OPT_CERT_KEY_PASS = 3,
+  OPT_CERT_INSECURE = 4,
+  OPT_CERT_TRUSTFILE = 5,
+  OPT_CERT_CLIENT_CERT_REQUEST = 6,
+  OPT_CERT_CLIENT_CERT_REQUIRE = 7,
+} long_opts_keys;
+
+static const char *sopts = "46hlknubTc:e:U:K:vp";
 static const struct option lopts[] = {
+  { "verbose", no_argument, .val = 'v' },
   { "ipv4", no_argument, .val = '4' },
   { "ipv6", no_argument, .val = '6' },
   { "help", no_argument, .val = 'h' },
@@ -37,9 +49,19 @@ static const struct option lopts[] = {
   { "tls", no_argument, .val = 'T' },
   { "sh-exec", required_argument, .val = 'c' },
   { "exec", required_argument, .val = 'e' },
+  { "expect-peer", required_argument, .val = 'p' },
 
   { "psk-user", required_argument, .val = 'U' },
   { "psk-key", required_argument, .val = 'K' },
+
+  { "cert", required_argument, .val = OPT_CERT },
+  { "cert-key", required_argument, .val = OPT_CERT_KEY },
+  { "cert-key-pass", required_argument, .val = OPT_CERT_KEY_PASS },
+  { "cert-insecure", no_argument, .val = OPT_CERT_INSECURE },
+  { "cert-trustfile", required_argument, .val = OPT_CERT_TRUSTFILE },
+  { "cert-client-cert-request", no_argument, .val = OPT_CERT_CLIENT_CERT_REQUEST },
+  { "cert-client-cert-require", no_argument, .val = OPT_CERT_CLIENT_CERT_REQUIRE },
+
   {}
 };
 
@@ -59,6 +81,16 @@ static const struct {
   {'T', "Use TLS or DTLS instead of TCP or UDP"},
   {'U', "Pre-Shared Key authentication username", "NAME"},
   {'K', "Pre-Shared Key authentication key (hex)", "HEX"},
+  {'p', "Expect peer name", "PEER"},
+
+  {OPT_CERT, "Certificate file"},
+  {OPT_CERT_KEY, "Certificate key"},
+  {OPT_CERT_KEY_PASS, "Certificate key passphrase"},
+  {OPT_CERT_INSECURE, "Disable certificate validation"},
+  {OPT_CERT_TRUSTFILE, "Certificate Authority trust file"},
+  {OPT_CERT_CLIENT_CERT_REQUEST, "Request client certificate"},
+  {OPT_CERT_CLIENT_CERT_REQUIRE, "Require client certificate"},
+
   {}
 };
 
@@ -85,6 +117,18 @@ opts_parse(options_t *opts, int argc, char **argv)
     case 'c': opts->exec = optarg; opts->shell = true; break;
     case 'e': opts->exec = optarg; opts->shell = false; break;
     case 'U': opts->psku = optarg; break;
+    case 'p': opts->expectpeer = optarg; break;
+    case OPT_CERT: opts->crtf = optarg; break;
+    case OPT_CERT_KEY: opts->crtk = optarg; break;
+    case OPT_CERT_KEY_PASS: opts->crtkp = optarg; break;
+    case OPT_CERT_INSECURE: opts->crtinsec = true; break;
+    case OPT_CERT_TRUSTFILE: opts->crtca = optarg; break;
+    case OPT_CERT_CLIENT_CERT_REQUEST:
+      opts->crtclientcert = TLS_CLIENT_CERT_REQUEST;
+      break;
+    case OPT_CERT_CLIENT_CERT_REQUIRE:
+      opts->crtclientcert = TLS_CLIENT_CERT_REQUIRE;
+      break;
 
     case 'K':
       opts->pskk = optarg;
@@ -148,8 +192,14 @@ usage:
           sprintf(lterm, "%s[=%s]", lopts[i].name, docs[j].arg);
       }
 
-      fprintf(stderr, "  -%c%-7s --%-18s %s\n",
-              docs[j].val, sterm, lterm, docs[j].doc);
+      if ((docs[j].val >= 'a' && docs[j].val <= 'z')
+          || (docs[j].val >= 'A' && docs[j].val <= 'Z')
+          || (docs[j].val >= '0' && docs[j].val <= '9'))
+        fprintf(stderr, "  -%c%-7s --%-18s %s\n",
+                docs[j].val, sterm, lterm, docs[j].doc);
+      else
+        fprintf(stderr, "            --%-18s %s\n",
+                lterm, docs[j].doc);
     }
   }
   return false;

@@ -26,9 +26,14 @@
 typedef struct {
   const char *host;
   const char *port;
+  const char *expectpeer;
   const char *exec;
   const char *psku;
   const char *pskk;
+  const char *crtf;
+  const char *crtk;
+  const char *crtkp;
+  const char *crtca;
 
   bool listen : 1;
   bool block : 1;
@@ -37,6 +42,9 @@ typedef struct {
   bool ipv6 : 1;
   bool udp : 1;
   bool tls : 1;
+  bool printpeer : 1;
+  bool crtinsec : 1;
+  int crtclientcert;
 } options_t;
 
 bool
