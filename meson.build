@@ -179,29 +179,41 @@ foreach v: variants
   endforeach
 endforeach
 
-foreach n: ['4', '6']
-  foreach p: ['TCP', 'PSK']
-    foreach c: tests
-      if c[0] == n and c[1] == p and c[2] == 'clt'
-        foreach s: tests
-          if s[0] == n and s[1] == p and (s[2] == 'esrv' or s[2] == 'rsrv')
-            args = ['--', c[5], '--', s[5]]
+# A single test consists of three elements of the tests array: a 'clt', an
+# 'esrv', and an 'rsrv'.  The tests array is, in order:
+#
+# - IP protocol ('4' or '6')
+# - strategy ('TCP' or 'PSK') - used for differentiation
+# - behavior ('clt' (client), 'esrv' (echo), or 'rsrv' (rev))
+# - name, used only for logging the (a->b) stuff
+# - whether to kill the particular job on completion
+# - an array containing argv for the executable (including the meson obj)
+#
+# So what this does: for every "clt" test, it looks for corresponding 'esrv'
+# and 'rsrv' tests.  I can read it now, but I can't fix it.
+foreach ip: ['4', '6']
+  foreach strat: ['TCP', 'PSK']
+    foreach client: tests
+      if client[0] == ip and client[1] == strat and client[2] == 'clt'
+        foreach server: tests
+          if server[0] == ip and server[1] == strat and (server[2] == 'esrv' or server[2] == 'rsrv')
+            args = ['--', client[5], '--', server[5]]
 
-            if s[2] == 'rsrv'
+            if server[2] == 'rsrv'
               args = ['-r'] + args
             endif
 
-            if c[4]
+            if client[4]
               args = ['-C'] + args
             endif
 
-            if s[4]
+            if server[4]
               args = ['-S'] + args
             endif
 
-            sep = s[2] == 'rsrv' ? ' => ' : ' -> '
+            sep = server[2] == 'rsrv' ? ' => ' : ' -> '
 
-            test(n + p + ': ' + c[3] + sep + s[3], run, args: args)
+            test(ip + strat + ': ' + client[3] + sep + server[3], run, args: args)
           endif
         endforeach
       endif
