@@ -42,10 +42,15 @@ dl = cc.find_library('dl', required: false)
 
 openssl = dependency('openssl', version: '>=1.1.0', required: false)
 gnutls = dependency('gnutls', version: '>=3.6.0', required: false)
+mitkrb5 = dependency('mit-krb5-gssapi', required: false)
+heimdal = dependency('heimdal-krb5-gssapi', required: false)
 threads = dependency('threads')
 
-variants = [ openssl, gnutls ]
-assert(variants.length() > 0, 'At least one TLS library is required!')
+tls_variants = [ openssl, gnutls ]
+assert(tls_variants.length() > 0, 'At least one TLS library is required!')
+
+gss_variants = [ mitkrb5, heimdal ]
+assert(gss_variants.length() > 0, 'At least one GSSAPI library is required!')
 
 install_headers('lib/tlssock.h')
 
@@ -120,7 +125,7 @@ foreach n: ['4', '6']
   endif
 endforeach
 
-foreach v: variants
+foreach v: tls_variants
   if not v.found()
     continue
   endif
@@ -177,6 +182,32 @@ foreach v: variants
       tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', rev.full_path(), h, '%PORT%'
     ]]]
   endforeach
+endforeach
+
+foreach v: gss_variants
+  if not v.found()
+    continue
+  endif
+
+  lib = shared_library('gsssock-' + v.name(),
+                       ['lib/gss.c', 'lib/gss.h',
+                        'lib/gss-internal.c', 'lib/gss-internal.h',
+                        'lib/buf.c', 'lib/buf.h',
+                        'lib/idx.h', 'lib/idx.c',
+                        'lib/locks.c', 'lib/locks.h'],
+                       dependencies: [v, threads, dl],
+                       install: true)
+
+  pkg.generate(
+    description: 'A library for doing GSSAPI at the socket layer using ' +
+                 v.name(),
+    libraries: lib,
+    name: 'gsssock-' + v.name(),
+    version: meson.project_version(),
+    install_dir: join_paths(get_option('libdir'), 'pkgconfig')
+  )
+
+  # TODO tests
 endforeach
 
 # A single test consists of three elements of the tests array: a 'clt', an
