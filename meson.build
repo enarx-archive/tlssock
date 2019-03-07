@@ -207,14 +207,48 @@ foreach v: gss_variants
     install_dir: join_paths(get_option('libdir'), 'pkgconfig')
   )
 
-  # TODO tests
+  gsssock = executable('gsssock-' + v.name(), [
+      'bin/hex.c', 'bin/hex.h',
+      'bin/non.c', 'bin/non.h',
+      'bin/exe.c', 'bin/exe.h',
+      'bin/opt.c', 'bin/opt.h',
+      'bin/main.c',
+    ],
+    link_with: lib
+  )
+
+  foreach n: ['4', '6']
+    h = 'localhost' + n
+
+    # First, sanity - does the fallthrough work
+    tests += [[n, 'TCP', 'clt', 'gss-' + v.name(), false, [
+      gsssock, h, '%PORT%'
+    ]]]
+    tests += [[n, 'TCP', 'esrv', 'gss-' + v.name(), false, [
+      gsssock, '-e', cat, '-l', h, '%PORT%'
+    ]]]
+    tests += [[n, 'TCP', 'rsrv', 'gss-' + v.name(), false, [
+      gsssock, '-e', rev.full_path(), '-l', h, '%PORT%'
+    ]]]
+
+    # Now actually test the GSS code
+    tests += [[n, 'GSS', 'clt', 'gss-' + v.name(), false, [
+      gsssock, '-G', h, '%PORT%'
+    ]]]
+    tests += [[n, 'GSS', 'esrv', 'gss-' + v.name(), false, [
+      gsssock, '-l', '-G', '-e', cat, h, '%PORT%'
+    ]]]
+    tests += [[n, 'GSS', 'rsrv', 'gss-' + v.name(), false, [
+      gsssock, '-l', '-G', '-e', rev.full_path(), h, '%PORT%'
+    ]]]
+  endforeach
 endforeach
 
 # A single test consists of three elements of the tests array: a 'clt', an
 # 'esrv', and an 'rsrv'.  The tests array is, in order:
 #
 # - IP protocol ('4' or '6')
-# - strategy ('TCP' or 'PSK') - used for differentiation
+# - strategy ('TCP', 'PSK', or 'GSS') - used for differentiation
 # - behavior ('clt' (client), 'esrv' (echo), or 'rsrv' (rev))
 # - name, used only for logging the (a->b) stuff
 # - whether to kill the particular job on completion
@@ -223,7 +257,7 @@ endforeach
 # So what this does: for every "clt" test, it looks for corresponding 'esrv'
 # and 'rsrv' tests.  I can read it now, but I can't fix it.
 foreach ip: ['4', '6']
-  foreach strat: ['TCP', 'PSK']
+  foreach strat: ['TCP', 'PSK', 'GSS']
     foreach client: tests
       if client[0] == ip and client[1] == strat and client[2] == 'clt'
         foreach server: tests
