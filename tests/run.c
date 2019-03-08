@@ -233,6 +233,10 @@ main(int argc, char *argv[])
 
     default:
       fprintf(stderr, "Unknown option: %c!\n", c);
+      fprintf(stderr, "Usage: %s [-r] [-C] [-S]\n\n", argv[0]);
+      fprintf(stderr, "-r: Server behaves like rev\n");
+      fprintf(stderr, "-C: Kill client when test complete\n");
+      fprintf(stderr, "-S: Kill server when test complete\n");
       return EXIT_FAILURE;
     }
   }
