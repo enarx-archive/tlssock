@@ -98,7 +98,7 @@ non_write(int fd, void *buf, size_t len)
   uint8_t *b = buf;
   ssize_t ret;
 
-  ret = write(fd, buf, len);
+  ret = send(fd, buf, len, 0);
   if (ret < 0) {
     if (errno != EAGAIN)
       return ret;
