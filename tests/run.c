@@ -272,12 +272,12 @@ main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
 
-  ret = write(out, msg, strlen(msg));
+  ret = send(out, msg, strlen(msg), 0);
   fprintf(stderr, "wrote: %zd: %s\n", ret, msg);
   if (ret != (ssize_t) strlen(msg))
     return EXIT_FAILURE;
 
-  ret = read(in, buf, sizeof(buf) - 1);
+  ret = recv(in, buf, sizeof(buf) - 1, 0);
   fprintf(stderr, "read: %zd: %s\n", ret, buf);
   if (ret != (ssize_t) strlen(msg))
     return EXIT_FAILURE;
