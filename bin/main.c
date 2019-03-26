@@ -25,6 +25,7 @@
 #include "exe.h"
 #include "non.h"
 
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -183,12 +184,22 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
   while (poll(pfds, 2, -1) >= 0) {
     char buffer[64 * 1024] = {};
     ssize_t ret;
+    struct stat st;
 
     for (int i = 0; i < 2; i++) {
       if (!pfds[i].revents)
         continue;
 
-      ret = read(pfds[i].fd, buffer, sizeof(buffer));
+      if (fstat(pfds[i].fd, &st)) {
+        fprintf(stderr, "Error in fstat. %m\n");
+        return -1;
+      }
+
+      if (S_ISSOCK(st.st_mode))
+        ret = recv(pfds[i].fd, buffer, sizeof(buffer), 0);
+      else
+        ret = read(pfds[i].fd, buffer, sizeof(buffer));
+
       if (ret <= 0) {
         if (pfds[i].revents != POLLHUP &&
             (errno == EAGAIN || errno == EWOULDBLOCK))

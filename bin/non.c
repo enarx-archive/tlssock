@@ -21,6 +21,8 @@
 
 #include "non.h"
 
+#include <sys/stat.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <errno.h>
@@ -97,8 +99,18 @@ non_write(int fd, void *buf, size_t len)
   struct pollfd pfd = { .fd = fd, .events = POLLOUT };
   uint8_t *b = buf;
   ssize_t ret;
+  struct stat st;
 
-  ret = write(fd, buf, len);
+  if (fstat(fd, &st)) {
+    fprintf(stderr, "Error in fstat. %m\n");
+    return -1;
+  }
+
+  if (S_ISSOCK(st.st_mode))
+    ret = send(fd, buf, len, 0);
+  else
+    ret = write(fd, buf, len);
+
   if (ret < 0) {
     if (errno != EAGAIN)
       return ret;
