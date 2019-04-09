@@ -1,8 +1,8 @@
 /* vim: set tabstop=8 shiftwidth=2 softtabstop=2 expandtab smarttab colorcolumn=80: */
 /*
- * Copyright 2018 Red Hat, Inc.
+ * Copyright 2018,2019 Red Hat, Inc.
  *
- * Author: Nathaniel McCallum
+ * Author: Nathaniel McCallum, Robbie Harwood
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,14 +21,27 @@
 
 #pragma once
 
-#include "tls.h"
+#include <pthread.h>
 #include <stdbool.h>
 
-bool
-idx_set(int fd, tls_t *tls, tls_t **already);
+typedef void *(*ref_cb_fn)(void *);
+typedef struct {
+  pthread_rwlock_t rwl;
+  void **elts;
+  size_t len;
 
-tls_t *
-idx_get(int fd);
+  ref_cb_fn incref;
+  ref_cb_fn decref;
+} idx_t;
 
 bool
-idx_del(int fd);
+idx_set(idx_t *idx, int fd, void *elt, void *already);
+
+void *
+idx_get(idx_t *idx, int fd);
+
+bool
+idx_del(idx_t *idx, int fd);
+
+void
+idx_destroy(idx_t *idx);
