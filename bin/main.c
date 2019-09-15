@@ -188,7 +188,7 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
       if (!pfds[i].revents)
         continue;
 
-      ret = read(pfds[i].fd, buffer, sizeof(buffer));
+      ret = recv(pfds[i].fd, buffer, sizeof(buffer), 0);
       if (ret <= 0) {
         if (pfds[i].revents != POLLHUP &&
             (errno == EAGAIN || errno == EWOULDBLOCK))
