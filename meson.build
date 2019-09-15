@@ -42,10 +42,15 @@ dl = cc.find_library('dl', required: false)
 
 openssl = dependency('openssl', version: '>=1.1.0', required: false)
 gnutls = dependency('gnutls', version: '>=3.6.0', required: false)
+mitkrb5 = dependency('mit-krb5-gssapi', required: false)
+heimdal = dependency('heimdal-krb5-gssapi', required: false)
 threads = dependency('threads')
 
-variants = [ openssl, gnutls ]
-assert(variants.length() > 0, 'At least one TLS library is required!')
+tls_variants = [ openssl, gnutls ]
+assert(tls_variants.length() > 0, 'At least one TLS library is required!')
+
+gss_variants = [ mitkrb5, heimdal ]
+assert(gss_variants.length() > 0, 'At least one GSSAPI library is required!')
 
 install_headers('lib/tlssock.h')
 
@@ -120,7 +125,7 @@ foreach n: ['4', '6']
   endif
 endforeach
 
-foreach v: variants
+foreach v: tls_variants
   if not v.found()
     continue
   endif
@@ -179,11 +184,71 @@ foreach v: variants
   endforeach
 endforeach
 
+foreach v: gss_variants
+  if not v.found()
+    continue
+  endif
+
+  lib = shared_library('gsssock-' + v.name(),
+                       ['lib/gss.c', 'lib/gss.h',
+                        'lib/gss-internal.c', 'lib/gss-internal.h',
+                        'lib/buf.c', 'lib/buf.h',
+                        'lib/idx.h', 'lib/idx.c',
+                        'lib/locks.c', 'lib/locks.h'],
+                       dependencies: [v, threads, dl],
+                       install: true)
+
+  pkg.generate(
+    description: 'A library for doing GSSAPI at the socket layer using ' +
+                 v.name(),
+    libraries: lib,
+    name: 'gsssock-' + v.name(),
+    version: meson.project_version(),
+    install_dir: join_paths(get_option('libdir'), 'pkgconfig')
+  )
+
+  gsssock = executable('gsssock-' + v.name(), [
+      'bin/hex.c', 'bin/hex.h',
+      'bin/non.c', 'bin/non.h',
+      'bin/exe.c', 'bin/exe.h',
+      'bin/opt.c', 'bin/opt.h',
+      'bin/main.c',
+    ],
+    link_with: lib
+  )
+
+  foreach n: ['4', '6']
+    h = 'localhost' + n
+
+    # First, sanity - does the fallthrough work
+    tests += [[n, 'TCP', 'clt', 'gss-' + v.name(), false, [
+      gsssock, h, '%PORT%'
+    ]]]
+    tests += [[n, 'TCP', 'esrv', 'gss-' + v.name(), false, [
+      gsssock, '-e', cat, '-l', h, '%PORT%'
+    ]]]
+    tests += [[n, 'TCP', 'rsrv', 'gss-' + v.name(), false, [
+      gsssock, '-e', rev.full_path(), '-l', h, '%PORT%'
+    ]]]
+
+    # Now actually test the GSS code
+    tests += [[n, 'GSS', 'clt', 'gss-' + v.name(), false, [
+      gsssock, '-G', h, '%PORT%'
+    ]]]
+    tests += [[n, 'GSS', 'esrv', 'gss-' + v.name(), false, [
+      gsssock, '-l', '-G', '-e', cat, h, '%PORT%'
+    ]]]
+    tests += [[n, 'GSS', 'rsrv', 'gss-' + v.name(), false, [
+      gsssock, '-l', '-G', '-e', rev.full_path(), h, '%PORT%'
+    ]]]
+  endforeach
+endforeach
+
 # A single test consists of three elements of the tests array: a 'clt', an
 # 'esrv', and an 'rsrv'.  The tests array is, in order:
 #
 # - IP protocol ('4' or '6')
-# - strategy ('TCP' or 'PSK') - used for differentiation
+# - strategy ('TCP', 'PSK', or 'GSS') - used for differentiation
 # - behavior ('clt' (client), 'esrv' (echo), or 'rsrv' (rev))
 # - name, used only for logging the (a->b) stuff
 # - whether to kill the particular job on completion
@@ -192,7 +257,7 @@ endforeach
 # So what this does: for every "clt" test, it looks for corresponding 'esrv'
 # and 'rsrv' tests.  I can read it now, but I can't fix it.
 foreach ip: ['4', '6']
-  foreach strat: ['TCP', 'PSK']
+  foreach strat: ['TCP', 'PSK', 'GSS']
     foreach client: tests
       if client[0] == ip and client[1] == strat and client[2] == 'clt'
         foreach server: tests

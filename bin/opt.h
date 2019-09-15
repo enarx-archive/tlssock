@@ -37,6 +37,7 @@ typedef struct {
   bool ipv6 : 1;
   bool udp : 1;
   bool tls : 1;
+  bool gss : 1;
 } options_t;
 
 bool

@@ -21,6 +21,7 @@
 
 #include "core.h"
 #include "tlssock.h"
+#include "tls.h"
 #include "idx.h"
 
 #include <sys/uio.h>
@@ -28,11 +29,23 @@
 #include <errno.h>
 #include <stdio.h>
 
+static idx_t idx = {
+  .rwl = PTHREAD_RWLOCK_INITIALIZER,
+  .incref = (ref_cb_fn) &tls_incref,
+  .decref = (ref_cb_fn) &tls_decref,
+};
+
+static void __attribute__((destructor))
+destructor(void)
+{
+  idx_destroy(&idx);
+}
+
 static inline bool
 is_tls(int fd, int errnum)
 {
   tls_auto_t *tls = NULL;
-  tls = idx_get(fd);
+  tls = idx_get(&idx, fd);
   if (!tls && errnum != 0)
     errno = errnum;
   return tls;
@@ -121,12 +134,12 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
   if (fd >= 0) {
     tls_auto_t *lis = NULL;
 
-    lis = idx_get(sockfd);
+    lis = idx_get(&idx, sockfd);
     if (lis) {
       tls_auto_t *con = NULL;
 
       con = test_tls_new(fd);
-      if (!con || !idx_set(fd, con, NULL)) {
+      if (!con || !idx_set(&idx, fd, con, NULL)) {
         close(fd);
         return -1;
       }
@@ -139,7 +152,7 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 int
 close(int fd)
 {
-  idx_del(fd);
+  idx_del(&idx, fd);
   return NEXT(close)(fd);
 }
 
@@ -174,7 +187,7 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
   if (level == IPPROTO_TLS) {
     tls_auto_t *tls = NULL;
 
-    tls = idx_get(sockfd);
+    tls = idx_get(&idx, sockfd);
     if (!tls) {
       errno = EINVAL; // FIXME
       return -1;
@@ -195,7 +208,7 @@ getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen)
       return -1;
     }
 
-    tls = idx_get(sockfd);
+    tls = idx_get(&idx, sockfd);
     if (tls)
       *prot = IPPROTO_TLS;
   }
@@ -208,7 +221,7 @@ read(int fd, void *buf, size_t count)
 {
   tls_auto_t *tls = NULL;
 
-  tls = idx_get(fd);
+  tls = idx_get(&idx, fd);
   if (!tls)
     return NEXT(read)(fd, buf, count);
 
@@ -220,7 +233,7 @@ recv(int sockfd, void *buf, size_t len, int flags)
 {
   tls_auto_t *tls = NULL;
 
-  tls = idx_get(sockfd);
+  tls = idx_get(&idx, sockfd);
   if (!tls)
     return NEXT(recv)(sockfd, buf, len, flags);
 
@@ -253,7 +266,7 @@ send(int sockfd, const void *buf, size_t len, int flags)
 {
   tls_auto_t *tls = NULL;
 
-  tls = idx_get(sockfd);
+  tls = idx_get(&idx, sockfd);
   if (!tls)
     return NEXT(send)(sockfd, buf, len, flags);
 
@@ -296,7 +309,7 @@ setsockopt(int sockfd, int level, int optname,
     if (!opt)
       return -1;
 
-    tls = idx_get(sockfd);
+    tls = idx_get(&idx, sockfd);
     if (!tls) {
       errno = EINVAL; // FIXME
       return -1;
@@ -331,7 +344,7 @@ setsockopt(int sockfd, int level, int optname,
       return -1;
 
     /* If setting the TLS instance worked, we're now TLS. */
-    if (idx_set(sockfd, tls, &already))
+    if (idx_set(&idx, sockfd, tls, &already))
       return 0;
 
     if (already)
@@ -342,7 +355,7 @@ setsockopt(int sockfd, int level, int optname,
   /* The caller wants to transition to non-TLS. */
   } else {
     /* If deletion succeeded, then transition was successful. */
-    if (idx_del(sockfd))
+    if (idx_del(&idx, sockfd))
       return 0;
 
     /* If the error is that there was no entry,
@@ -367,7 +380,7 @@ socket(int domain, int type, int protocol)
   switch (protocol) {
   case IPPROTO_TLS:
     tls = test_tls_new(fd);
-    if (!tls || !idx_set(fd, tls, NULL)) {
+    if (!tls || !idx_set(&idx, fd, tls, NULL)) {
       close(fd);
       return -1;
     }
@@ -381,7 +394,7 @@ write(int fd, const void *buf, size_t count)
 {
   tls_auto_t *tls = NULL;
 
-  tls = idx_get(fd);
+  tls = idx_get(&idx, fd);
   if (!tls)
     return NEXT(write)(fd, buf, count);
 

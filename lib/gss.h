@@ -1,8 +1,8 @@
 /* vim: set tabstop=8 shiftwidth=2 softtabstop=2 expandtab smarttab colorcolumn=80: */
 /*
- * Copyright 2018,2019 Red Hat, Inc.
+ * Copyright 2019 Red Hat, Inc.
  *
- * Author: Nathaniel McCallum, Robbie Harwood
+ * Author: Robbie Harwood
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,29 +19,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#pragma once
+/*
+ * Beyond indicating IPPROTO_GSS at creation, GSSAPI requires only a single
+ * setsockopt() on the client to set the server name (and none on the server).
+ * To GSSAPI, our clients are always initiators, and our servers are always
+ * acceptors.
+ */
 
-#include <pthread.h>
-#include <stdbool.h>
+#define IPPROTO_GSS 254 /* Our protocol (woo!) */
 
-typedef void *(*ref_cb_fn)(void *);
-typedef struct {
-  pthread_rwlock_t rwl;
-  void **elts;
-  size_t len;
-
-  ref_cb_fn incref;
-  ref_cb_fn decref;
-} idx_t;
-
-bool
-idx_set(idx_t *idx, int fd, void *elt, void *already);
-
-void *
-idx_get(idx_t *idx, int fd);
-
-bool
-idx_del(idx_t *idx, int fd);
-
-void
-idx_destroy(idx_t *idx);
+/* Various socket options.  Server name can only be set prior to handshake,
+ * and must be set on the client.  These flags can function as a bitmask. */
+enum {
+  GSS_SERVER_NAME = 1 << 0,
+  GSS_HANDSHAKE_CLIENT = 1 << 1,
+  GSS_HANDSHAKE_SERVER = 1 << 2,
+};

@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *sopts = "46hlknubTc:e:U:K:";
+static const char *sopts = "46hlknubTGc:e:U:K:";
 static const struct option lopts[] = {
   { "ipv4", no_argument, .val = '4' },
   { "ipv6", no_argument, .val = '6' },
@@ -35,6 +35,7 @@ static const struct option lopts[] = {
   { "udp", no_argument, .val = 'u' },
   { "block", no_argument, .val = 'b' },
   { "tls", no_argument, .val = 'T' },
+  { "gss", no_argument, .val = 'G' },
   { "sh-exec", required_argument, .val = 'c' },
   { "exec", required_argument, .val = 'e' },
 
@@ -54,9 +55,10 @@ static const struct {
   {'e', "Execute the given command", "CMD"},
   {'l', "Bind and listen for an incoming connection"},
   {'h', "Display this help message"},
-  {'u', "Use UDP (or DTLS) instead of default (TCP [TLS])"},
+  {'u', "Use UDP (or DTLS) instead of default (TCP)"},
   {'b', "Use blocking sockets (internally)"},
   {'T', "Use TLS or DTLS instead of TCP or UDP"},
+  {'G', "Use GSSAPI instead of TCP or UDP"},
   {'U', "Pre-Shared Key authentication username", "NAME"},
   {'K', "Pre-Shared Key authentication key (hex)", "HEX"},
   {}
@@ -82,6 +84,7 @@ opts_parse(options_t *opts, int argc, char **argv)
     case 'u': opts->udp = true; break;
     case 'b': opts->block = true; break;
     case 'T': opts->tls = true; break;
+    case 'G': opts->gss = true; break;
     case 'c': opts->exec = optarg; opts->shell = true; break;
     case 'e': opts->exec = optarg; opts->shell = false; break;
     case 'U': opts->psku = optarg; break;
@@ -121,6 +124,11 @@ opts_parse(options_t *opts, int argc, char **argv)
     goto usage;
   }
 
+  if (opts->tls && opts->gss) {
+    fprintf(stderr, "The -G and -T options are mutually exclusive!\n\n");
+    goto usage;
+  }
+
   return true;
 
 usage:
@@ -154,4 +162,3 @@ usage:
   }
   return false;
 }
-

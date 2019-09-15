@@ -28,40 +28,36 @@
 #include <unistd.h>
 #include <errno.h>
 
-static struct {
-  pthread_rwlock_t rwl;
-  tls_t **tls;
-  size_t len;
-} idx = { .rwl = PTHREAD_RWLOCK_INITIALIZER };
-
 static long pagesize;
 
 bool
-idx_set(int fd, tls_t *tls, tls_t **already)
+idx_set(idx_t *idx, int fd, void *elt, void *already_in)
 {
+  void **already = already_in;
+
   if (fd < 0)
     return false;
 
-  pthread_rwlock_wrlock(&idx.rwl);
+  pthread_rwlock_wrlock(&idx->rwl);
 
-  if (idx.len <= (unsigned int) fd) {
-    const int block = pagesize / sizeof(tls_t*);
-    tls_t **tmp = NULL;
+  if (idx->len <= (unsigned int) fd) {
+    const int block = pagesize / sizeof(void*);
+    void **tmp = NULL;
     size_t len = 0;
 
     len = (fd + block) / block * block;
-    tmp = realloc(idx.tls, sizeof(tls_t*) * len);
+    tmp = realloc(idx->elts, sizeof(void*) * len);
     if (!tmp)
       goto error;
 
-    memset(&tmp[idx.len], 0, sizeof(tls_t*) * (len - idx.len));
-    idx.len = len;
-    idx.tls = tmp;
+    memset(&tmp[idx->len], 0, sizeof(void*) * (len - idx->len));
+    idx->len = len;
+    idx->elts = tmp;
   }
 
-  if (idx.tls[fd]) {
+  if (idx->elts[fd]) {
     if (already) {
-      *already = tls_incref(idx.tls[fd]);
+      *already = idx->incref(idx->elts[fd]);
       if (*already)
         goto error;
     }
@@ -70,40 +66,40 @@ idx_set(int fd, tls_t *tls, tls_t **already)
     goto error;
   }
 
-  idx.tls[fd] = tls_incref(tls);
-  if (!idx.tls[fd])
+  idx->elts[fd] = idx->incref(elt);
+  if (!idx->elts[fd])
     goto error;
 
-  pthread_rwlock_unlock(&idx.rwl);
+  pthread_rwlock_unlock(&idx->rwl);
   return true;
 
 error:
-  pthread_rwlock_unlock(&idx.rwl);
+  pthread_rwlock_unlock(&idx->rwl);
   return false;
 }
 
-tls_t *
-idx_get(int fd)
+void *
+idx_get(idx_t *idx, int fd)
 {
-  tls_t *tls = NULL;
+  void *elt = NULL;
 
   if (fd < 0)
     return NULL;
 
-  pthread_rwlock_rdlock(&idx.rwl);
+  pthread_rwlock_rdlock(&idx->rwl);
 
-  if (idx.len <= (unsigned int) fd)
+  if (idx->len <= (unsigned int) fd)
     goto error;
 
-  tls = tls_incref(idx.tls[fd]);
+  elt = idx->incref(idx->elts[fd]);
 
 error:
-  pthread_rwlock_unlock(&idx.rwl);
-  return tls_incref(tls);
+  pthread_rwlock_unlock(&idx->rwl);
+  return idx->incref(elt);
 }
 
 bool
-idx_del(int fd)
+idx_del(idx_t *idx, int fd)
 {
   bool found = false;
 
@@ -112,15 +108,15 @@ idx_del(int fd)
     return false;
   }
 
-  pthread_rwlock_wrlock(&idx.rwl);
+  pthread_rwlock_wrlock(&idx->rwl);
 
-  if (idx.len > (unsigned int) fd && idx.tls[fd]) {
-    tls_decref(idx.tls[fd]);
-    idx.tls[fd] = NULL;
+  if (idx->len > (unsigned int) fd && idx->elts[fd]) {
+    idx->decref(idx->elts[fd]);
+    idx->elts[fd] = NULL;
     found = true;
   }
 
-  pthread_rwlock_unlock(&idx.rwl);
+  pthread_rwlock_unlock(&idx->rwl);
 
   if (!found)
     errno = ENOENT;
@@ -138,17 +134,17 @@ constructor(void)
     abort();
 }
 
-static void __attribute__((destructor))
-destructor(void)
+void
+idx_destroy(idx_t *idx)
 {
-  pthread_rwlock_wrlock(&idx.rwl);
+  pthread_rwlock_wrlock(&idx->rwl);
 
-  for (size_t i = 0; i < idx.len; i++)
-    tls_decref(idx.tls[i]);
+  for (size_t i = 0; i < idx->len; i++)
+    idx->decref(idx->elts[i]);
 
-  free(idx.tls);
-  idx.tls = NULL;
-  idx.len = 0;
+  free(idx->elts);
+  idx->elts = NULL;
+  idx->len = 0;
 
-  pthread_rwlock_destroy(&idx.rwl);
+  pthread_rwlock_destroy(&idx->rwl);
 }

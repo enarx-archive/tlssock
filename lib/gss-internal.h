@@ -1,8 +1,8 @@
 /* vim: set tabstop=8 shiftwidth=2 softtabstop=2 expandtab smarttab colorcolumn=80: */
 /*
- * Copyright 2018,2019 Red Hat, Inc.
+ * Copyright 2019 Red Hat, Inc.
  *
- * Author: Nathaniel McCallum, Robbie Harwood
+ * Author: Robbie Harwood
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,27 +21,34 @@
 
 #pragma once
 
-#include <pthread.h>
 #include <stdbool.h>
+#include <sys/socket.h>
 
-typedef void *(*ref_cb_fn)(void *);
-typedef struct {
-  pthread_rwlock_t rwl;
-  void **elts;
-  size_t len;
+typedef struct gss gss_t;
+#define gss_auto_t gss_t __attribute__((cleanup(gss_cleanup)))
 
-  ref_cb_fn incref;
-  ref_cb_fn decref;
-} idx_t;
-
-bool
-idx_set(idx_t *idx, int fd, void *elt, void *already);
-
-void *
-idx_get(idx_t *idx, int fd);
-
-bool
-idx_del(idx_t *idx, int fd);
+gss_t *
+gss_new(void);
 
 void
-idx_destroy(idx_t *idx);
+gss_cleanup(gss_t **gss);
+
+gss_t *
+gss_incref(gss_t *gss);
+
+gss_t *
+gss_decref(gss_t *gss);
+
+ssize_t
+gss_recv(gss_t *gss, int fd, void *buf, size_t count);
+
+ssize_t
+gss_send(gss_t *gss, int fd, void *buf, size_t count);
+
+int
+gss_setsockopt(gss_t *gss, int fd, int optname, const void *optval,
+               socklen_t optlen);
+
+int
+gss_getsockopt(gss_t *gss, int fd, int optname, void *optval,
+               socklen_t *optlen);

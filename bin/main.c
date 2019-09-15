@@ -20,6 +20,7 @@
  */
 
 #include "../lib/tlssock.h"
+#include "../lib/gss.h"
 #include "opt.h"
 #include "hex.h"
 #include "exe.h"
@@ -178,6 +179,22 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
       shutdown(con, SHUT_RDWR);
       return STATUS_FAILURE;
     }
+  } else if (ai->ai_protocol == IPPROTO_GSS) {
+    if (!opts->listen) {
+      const char *sname = "host@localhost";
+
+      if (non_setsockopt(con, IPPROTO_GSS,
+                         GSS_SERVER_NAME | GSS_HANDSHAKE_CLIENT,
+                         sname, strlen(sname))) {
+        fprintf(stderr, "%m: Unable to perform GSS client handshake!\n");
+        return STATUS_FAILURE;
+      }
+    } else {
+      if (non_setsockopt(con, IPPROTO_GSS, GSS_HANDSHAKE_SERVER, NULL, 0)) {
+        fprintf(stderr, "%m: Unable to perform GSSAPI server handshake!\n");
+        return STATUS_FAILURE;
+      }
+    }
   }
 
   while (poll(pfds, 2, -1) >= 0) {
@@ -279,6 +296,10 @@ main(int argc, char *argv[])
       if (!ai_applicable(&opts, i))
         continue;
       i->ai_protocol = IPPROTO_TLS;
+    } else if (opts.gss) {
+      if (!ai_applicable(&opts, i))
+        continue;
+      i->ai_protocol = IPPROTO_GSS;
     }
 
     fd = socket(i->ai_family, i->ai_socktype | flags, i->ai_protocol);
