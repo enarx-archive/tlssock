@@ -61,6 +61,7 @@ ncat = find_program('ncat', required: false)
 cat = find_program('cat').path()
 
 psk = '7df28f5439b5a051cc138b6e12128264'
+crtpin = 'foo:7df28f5439b5a051cc138b6e12128264'
 foreach n: ['4', '6']
   h = 'localhost' + n
 
@@ -98,6 +99,14 @@ foreach n: ['4', '6']
       gnuclt.path(), '-p', '%PORT%', '--pskusername=foo', '--pskkey=' + psk,
                      '--priority', 'NORMAL:+ECDHE-PSK:+DHE-PSK:+PSK', h
     ]]]
+    tests += [[n, 'CRT', 'clt', 'gnutls-cli', false, [
+      gnuclt.path(), '-p', '%PORT%', '--sni-hostname=' + h,
+                     '--verify-hostname=' + h,
+                     '--x509cafile=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.ca.pem',
+                     '--x509certfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.pem',
+                     '--x509keyfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.key.pem',
+                     h
+    ]]]
   endif
 
   if gnusrv.found()
@@ -116,6 +125,22 @@ foreach n: ['4', '6']
     tests += [[n, 'PSK', 'rsrv', 'openssl', true, [
       sslcli.path(), 's_server', '-nocert', '-rev', '-psk_identity', 'foo',
         '-accept', h + ':%PORT%', '-psk', psk
+    ]]]
+
+    tests += [[n, 'CRT', 'clt', 'openssl', true, [
+      sslcli.path(), 's_client', '-connect', h + ':%PORT%', '-quiet',
+      '-CAfile', meson.current_source_dir() + '/tests/certs/' + h + '.srv.ca.pem',
+      '-cert', meson.current_source_dir() + '/tests/certs/' + h + '.clt.pem',
+      '-key', meson.current_source_dir() + '/tests/certs/' + h + '.clt.key.pem',
+      '-pass', 'file:' + meson.current_source_dir() + '/tests/psk.txt',
+    ]]]
+    tests += [[n, 'CRT', 'rsrv', 'openssl', true, [
+      sslcli.path(), 's_server', '-rev',
+        '-accept', h + ':%PORT%',
+      '-CAfile', meson.current_source_dir() + '/tests/certs/' + h + '.clt.ca.pem',
+      '-cert', meson.current_source_dir() + '/tests/certs/' + h + '.srv.pem',
+      '-key', meson.current_source_dir() + '/tests/certs/' + h + '.srv.key.pem',
+      '-pass', 'file:' + meson.current_source_dir() + '/tests/psk.txt',
     ]]]
   endif
 endforeach
@@ -176,6 +201,58 @@ foreach v: variants
     tests += [[n, 'PSK', 'rsrv', 'ts-' + v.name(), false, [
       tlssock, '-lT', '-U', 'foo', '-K', psk, '-e', rev.full_path(), h, '%PORT%'
     ]]]
+
+    if v.name() == 'gnutls'
+      tests += [[n, 'CRT', 'clt', 'ts-' + v.name(), false, [
+        tlssock, '-T',
+        '--cert-trustfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.ca.pem',
+        '--cert=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.pem',
+        '--cert-key=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.key.pem',
+        '--cert-key-pass=' + crtpin,
+        '--expect-peer=CN=' + h + ',O=Unspecified,C=US',
+        h, '%PORT%'
+      ]]]
+      # Servers with anonymous clients
+      tests += [[n, 'CRT', 'esrv', 'ts-anon-' + v.name(), false, [
+        tlssock, '-lT',
+        '--cert-trustfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.ca.pem',
+        '--cert=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.pem',
+        '--cert-key=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.key.pem',
+        '--cert-key-pass=' + crtpin,
+        '--expect-peer=(no subject)',
+        '-e', cat, h, '%PORT%'
+      ]]]
+      tests += [[n, 'CRT', 'rsrv', 'ts-anon-' + v.name(), false, [
+        tlssock, '-lT',
+        '--cert-trustfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.ca.pem',
+        '--cert=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.pem',
+        '--cert-key=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.key.pem',
+        '--cert-key-pass=' + crtpin,
+        '--expect-peer=(no subject)',
+        '-e', rev.full_path(), h, '%PORT%'
+      ]]]
+      # Servers with client cert auth
+      tests += [[n, 'CRT', 'esrv', 'ts-mutual-' + v.name(), false, [
+        tlssock, '-lT',
+        '--cert-client-cert-request',
+        '--cert-trustfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.ca.pem',
+        '--cert=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.pem',
+        '--cert-key=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.key.pem',
+        '--cert-key-pass=' + crtpin,
+        '--expect-peer=CN=' + h + ' clt,O=Unspecified,C=US',
+        '-e', cat, h, '%PORT%'
+      ]]]
+      tests += [[n, 'CRT', 'rsrv', 'ts-mutual-' + v.name(), false, [
+        tlssock, '-lT',
+        '--cert-client-cert-require',
+        '--cert-trustfile=' + meson.current_source_dir() + '/tests/certs/' + h + '.clt.ca.pem',
+        '--cert=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.pem',
+        '--cert-key=' + meson.current_source_dir() + '/tests/certs/' + h + '.srv.key.pem',
+        '--cert-key-pass=' + crtpin,
+        '--expect-peer=CN=' + h + ' clt,O=Unspecified,C=US',
+        '-e', rev.full_path(), h, '%PORT%'
+      ]]]
+    endif
   endforeach
 endforeach
 
@@ -183,7 +260,7 @@ endforeach
 # 'esrv', and an 'rsrv'.  The tests array is, in order:
 #
 # - IP protocol ('4' or '6')
-# - strategy ('TCP' or 'PSK') - used for differentiation
+# - strategy ('TCP', 'CRT' or 'PSK') - used for differentiation
 # - behavior ('clt' (client), 'esrv' (echo), or 'rsrv' (rev))
 # - name, used only for logging the (a->b) stuff
 # - whether to kill the particular job on completion
@@ -192,7 +269,7 @@ endforeach
 # So what this does: for every "clt" test, it looks for corresponding 'esrv'
 # and 'rsrv' tests.  I can read it now, but I can't fix it.
 foreach ip: ['4', '6']
-  foreach strat: ['TCP', 'PSK']
+  foreach strat: ['TCP', 'PSK', 'CRT']
     foreach client: tests
       if client[0] == ip and client[1] == strat and client[2] == 'clt'
         foreach server: tests

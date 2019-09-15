@@ -143,6 +143,49 @@ clt_psk_cb(void *m, char **username, uint8_t **key)
   return keydup(o, key);
 }
 
+static int
+cert_cb(void *m,
+        char **cert_uri,
+        char **key_uri,
+        char **pin)
+{
+  const options_t *o = m;
+
+  *cert_uri = strdup(o->crtf);
+  if (!*cert_uri)
+    return -1;
+  *key_uri = strdup(o->crtk);
+  if (!key_uri)
+    return -1;
+  *pin = strdup(o->crtkp);
+  if (!pin)
+    return -1;
+
+  return 0;
+}
+
+static int
+clt_cert_cb(void *m,
+            const char **requested_ca_dn,
+            char **cert_uri,
+            char **key_uri,
+            char **pin)
+{
+  // We just ignore "requested_ca_dn" for now.
+  return cert_cb(m, cert_uri, key_uri, pin);
+}
+
+static int
+srv_cert_cb(void *m,
+            const char *servername,
+            char **cert_uri,
+            char **key_uri,
+            char **pin)
+{
+  // We just ignore "servername" for now.
+  return cert_cb(m, cert_uri, key_uri, pin);
+}
+
 static status_t
 on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
 {
@@ -160,6 +203,13 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
 
       if (opts->psku)
         srv.psk = srv_psk_cb;
+      else if (opts->crtf)
+      {
+        srv.cert.getcert = srv_cert_cb;
+        srv.cert.client_certificate_request = opts->crtclientcert;
+        srv.cert.cafile = opts->crtca;
+        srv.cert.insecure = opts->crtinsec;
+      }
 
       ret = non_setsockopt(con, IPPROTO_TLS,
                            TLS_SRV_HANDSHAKE, &srv, sizeof(srv));
@@ -168,6 +218,12 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
 
       if (opts->psku)
         clt.psk = clt_psk_cb;
+      else if (opts->crtf) {
+        clt.cert.getcert = clt_cert_cb;
+        clt.cert.cafile = opts->crtca;
+        clt.cert.insecure = opts->crtinsec;
+        clt.cert.hostname = opts->host;
+      }
 
       ret = non_setsockopt(con, IPPROTO_TLS,
                            TLS_CLT_HANDSHAKE, &clt, sizeof(clt));
@@ -177,6 +233,24 @@ on_conn(options_t *opts, int con, int in, int out, const struct addrinfo *ai)
       fprintf(stderr, "%m: Unable to complete TLS handshake!\n");
       shutdown(con, SHUT_RDWR);
       return STATUS_FAILURE;
+    }
+
+    if (opts->expectpeer != NULL) {
+      socklen_t dnlen = 256;
+      char *peer_dn = malloc(sizeof(char) * dnlen);
+      ret = getsockopt(con, IPPROTO_TLS, TLS_OPT_PEER_SUBJECT_DN, peer_dn, &dnlen);
+      if (ret != 0) {
+        fprintf(stderr, "%m: Unable to get peer subject DN!\n");
+        shutdown(con, SHUT_RDWR);
+        return STATUS_FAILURE;
+      }
+      if (strcmp(peer_dn, opts->expectpeer) != 0) {
+        fprintf(stderr, "%m: Peer name (%s) does not match expected (%s)!\n",
+                peer_dn, opts->expectpeer);
+        shutdown(con, SHUT_RDWR);
+        return STATUS_FAILURE;
+      }
+      free(peer_dn);
     }
   }
 
